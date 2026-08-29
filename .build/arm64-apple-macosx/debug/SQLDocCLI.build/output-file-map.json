@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCLI.build/primary.swiftdeps"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCLI/main.swift": {
+    "dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCLI.build/main.d",
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCLI.build/main.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCLI.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCLI.build/main.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCLI.build/main.dia"
+  }
+}

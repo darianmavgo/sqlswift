@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/sqldocPackageTests.build/primary.swiftdeps"
+  },
+  "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/sqldocPackageTests.derived/runner.swift": {
+    "dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/sqldocPackageTests.build/runner.d",
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/sqldocPackageTests.build/runner.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/sqldocPackageTests.build/runner~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/sqldocPackageTests.build/runner.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/sqldocPackageTests.build/runner.dia"
+  }
+}

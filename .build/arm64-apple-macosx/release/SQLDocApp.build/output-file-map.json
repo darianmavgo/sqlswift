@@ -1,0 +1,73 @@
+{
+  "": {
+    "dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/SQLDocApp.d",
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/SQLDocApp.o",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/primary.swiftdeps"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocApp/SQLDocApp.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/SQLDocApp.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/SQLDocApp~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/SQLDocApp.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/SQLDocApp.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocApp/Theme/AppTheme.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/AppTheme.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/AppTheme~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/AppTheme.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/AppTheme.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocApp/ViewModels/AppViewModel.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/AppViewModel.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/AppViewModel~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/AppViewModel.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/AppViewModel.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocApp/ViewModels/TableViewModel.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/TableViewModel.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/TableViewModel~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/TableViewModel.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/TableViewModel.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocApp/Views/Components/FindBarView.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/FindBarView.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/FindBarView~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/FindBarView.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/FindBarView.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocApp/Views/Components/GridHeaderView.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/GridHeaderView.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/GridHeaderView~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/GridHeaderView.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/GridHeaderView.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocApp/Views/Components/StatusBarView.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/StatusBarView.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/StatusBarView~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/StatusBarView.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/StatusBarView.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocApp/Views/GalleryView.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/GalleryView.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/GalleryView~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/GalleryView.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/GalleryView.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocApp/Views/MainView.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/MainView.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/MainView~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/MainView.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/MainView.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocApp/Views/StartPageView.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/StartPageView.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/StartPageView~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/StartPageView.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/StartPageView.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocApp/Views/VirtualizedGridView.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/VirtualizedGridView.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/VirtualizedGridView~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/VirtualizedGridView.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocApp.build/VirtualizedGridView.dia"
+  }
+}

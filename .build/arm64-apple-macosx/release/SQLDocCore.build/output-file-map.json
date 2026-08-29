@@ -1,0 +1,121 @@
+{
+  "": {
+    "dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLDocCore.d",
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLDocCore.o",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/primary.swiftdeps"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Benchmark/BenchmarkRunner.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/BenchmarkRunner.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/BenchmarkRunner~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/BenchmarkRunner.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/BenchmarkRunner.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Engine/CSVExporter.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/CSVExporter.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/CSVExporter~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/CSVExporter.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/CSVExporter.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Engine/ColumnSampler.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/ColumnSampler.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/ColumnSampler~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/ColumnSampler.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/ColumnSampler.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Engine/Counter.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Counter.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Counter~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Counter.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Counter.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Engine/Doc.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Doc.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Doc~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Doc.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Doc.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Engine/Finder.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Finder.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Finder~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Finder.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Finder.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Engine/RowReader.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/RowReader.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/RowReader~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/RowReader.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/RowReader.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/Column.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Column.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Column~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Column.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Column.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/ColumnHint.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/ColumnHint.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/ColumnHint~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/ColumnHint.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/ColumnHint.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/FindResult.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/FindResult.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/FindResult~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/FindResult.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/FindResult.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/Page.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Page.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Page~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Page.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Page.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/Style.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Style.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Style~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Style.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Style.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/Table.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Table.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Table~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Table.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/Table.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/TableCount.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/TableCount.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/TableCount~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/TableCount.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/TableCount.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/SQLite/SQLiteConnection.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLiteConnection.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLiteConnection~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLiteConnection.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLiteConnection.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/SQLite/SQLiteError.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLiteError.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLiteError~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLiteError.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLiteError.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/SQLite/SQLiteValue.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLiteValue.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLiteValue~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLiteValue.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SQLiteValue.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Session/RecentsManager.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/RecentsManager.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/RecentsManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/RecentsManager.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/RecentsManager.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Session/SessionManager.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SessionManager.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SessionManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SessionManager.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocCore.build/SessionManager.dia"
+  }
+}

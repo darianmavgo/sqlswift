@@ -1,0 +1,43 @@
+{
+  "": {
+    "dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/SQLDocTests.d",
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/SQLDocTests.o",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/primary.swiftdeps"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Tests/SQLDocTests/CSVExporterTests.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/CSVExporterTests.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/CSVExporterTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/CSVExporterTests.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/CSVExporterTests.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Tests/SQLDocTests/CounterTests.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/CounterTests.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/CounterTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/CounterTests.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/CounterTests.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Tests/SQLDocTests/FinderTests.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/FinderTests.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/FinderTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/FinderTests.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/FinderTests.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Tests/SQLDocTests/KeysetPagingTests.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/KeysetPagingTests.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/KeysetPagingTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/KeysetPagingTests.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/KeysetPagingTests.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Tests/SQLDocTests/SQLiteConnectionTests.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/SQLiteConnectionTests.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/SQLiteConnectionTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/SQLiteConnectionTests.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/SQLiteConnectionTests.dia"
+  },
+  "/Users/darianhickman/Documents/sqlswift/Tests/SQLDocTests/StyleNavTests.swift": {
+    "object": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/StyleNavTests.swift.o",
+    "swiftmodule": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/StyleNavTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/StyleNavTests.swiftdeps",
+    "diagnostics": "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/release/SQLDocTests.build/StyleNavTests.dia"
+  }
+}
