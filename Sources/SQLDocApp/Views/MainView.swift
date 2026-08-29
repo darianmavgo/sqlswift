@@ -4,7 +4,8 @@ import UniformTypeIdentifiers
 
 public struct MainView: View {
     @ObservedObject public var appVM: AppViewModel
-    @State private var tableVMs: [String: TableViewModel] = [:]
+    @State private var tableVMCache: [String: TableViewModel] = [:]
+    @State private var activeTableVM: TableViewModel?
 
     public init(appVM: AppViewModel = AppViewModel()) {
         self._appVM = ObservedObject(wrappedValue: appVM)
@@ -15,35 +16,29 @@ public struct MainView: View {
             // Top Navigation Bar
             topBarView
 
-            // Main Content Area (Grid / Gallery / Start with Floating Find Bar)
+            // Docked find strip (pushes content down, never covers data).
+            if appVM.isFindBarVisible, let activeTableVM {
+                FindBarView(tableVM: activeTableVM) {
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        appVM.isFindBarVisible = false
+                        activeTableVM.cancelFind()
+                    }
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            // Main Content Area (Grid / Gallery / Start)
             ZStack(alignment: .topTrailing) {
                 if appVM.activeDocEntry != nil {
                     if appVM.isGalleryView {
                         GalleryView(appVM: appVM)
-                    } else if let activeTableVM = currentTableVM {
+                    } else if let activeTableVM {
                         VirtualizedGridView(appVM: appVM, tableVM: activeTableVM)
                     } else {
                         ProgressView("Loading schema…")
                     }
                 } else {
                     StartPageView(appVM: appVM)
-                }
-
-                // Floating Find Bar Overlay matching sqldoc
-                if appVM.isFindBarVisible, let activeTableVM = currentTableVM {
-                    FindBarView(tableVM: activeTableVM) {
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            appVM.isFindBarVisible = false
-                            activeTableVM.cancelFind()
-                        }
-                    }
-                    .padding(.top, 8)
-                    .padding(.trailing, 14)
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .move(edge: .top)),
-                        removal: .opacity
-                    ))
-                    .zIndex(30)
                 }
 
                 // Drop Overlay
@@ -79,12 +74,15 @@ public struct MainView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             // Status Bar
-            if let activeTableVM = currentTableVM {
+            if let activeTableVM {
                 StatusBarView(appVM: appVM, tableVM: activeTableVM)
             }
         }
         .accentColor(appVM.activeDocEntry != nil ? AppTheme.color(from: appVM.activeDocEntry!.doc.style.accent) : Color.accentColor)
         .preferredColorScheme(appVM.effectiveColorScheme)
+        .onAppear { syncActiveTableVM() }
+        .onChange(of: appVM.selectedTableName) { _, _ in syncActiveTableVM() }
+        .onChange(of: appVM.activeDocEntry?.id) { _, _ in syncActiveTableVM() }
         .sheet(item: $appVM.inspectingCell) { info in
             DataInspectorView(info: info) {
                 appVM.inspectingCell = nil
@@ -105,15 +103,29 @@ public struct MainView: View {
         }
     }
 
-    private var currentTableVM: TableViewModel? {
-        guard let entry = appVM.activeDocEntry, !appVM.selectedTableName.isEmpty else { return nil }
+    /// Resolves the table view-model for the current doc + table selection.
+    /// Runs from lifecycle callbacks, never during `body` evaluation, and evicts
+    /// view-models for databases that are no longer open (freeing their pages and
+    /// background observers).
+    private func syncActiveTableVM() {
+        let openIDs = Set(appVM.openDocuments.map { $0.id })
+        for (key, vm) in tableVMCache where !openIDs.contains(String(key.split(separator: ":").first ?? "")) {
+            vm.dispose()
+            tableVMCache.removeValue(forKey: key)
+        }
+
+        guard let entry = appVM.activeDocEntry, !appVM.selectedTableName.isEmpty else {
+            activeTableVM = nil
+            return
+        }
         let key = "\(entry.id):\(appVM.selectedTableName)"
-        if let existing = tableVMs[key] {
-            return existing
+        if let existing = tableVMCache[key] {
+            activeTableVM = existing
+            return
         }
         let vm = TableViewModel(doc: entry.doc, tableName: appVM.selectedTableName, docID: entry.id)
-        tableVMs[key] = vm
-        return vm
+        tableVMCache[key] = vm
+        activeTableVM = vm
     }
 
     private var topBarView: some View {

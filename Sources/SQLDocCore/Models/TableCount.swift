@@ -15,7 +15,7 @@ public struct TableCount: Equatable, Codable, Sendable {
 
     public var displayString: String {
         if !known { return "?" }
-        let formatted = NumberFormatter.localizedString(from: NSNumber(value: rows), number: .decimal)
+        let formatted = SQLiteValueFormat.integerString(rows)
         return exact ? formatted : "\(formatted)~"
     }
 

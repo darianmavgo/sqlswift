@@ -5,9 +5,16 @@ public final class ColumnSampler: @unchecked Sendable {
     private let lock = NSLock()
     private var hints: [String: ColumnHint] = [:]
     private var activeTasks: [String: Task<Void, Never>] = [:]
-    public var onHintUpdated: (@Sendable (String, ColumnHint) -> Void)?
+    // Keyed by table — see CounterWorker.observers.
+    private var observers: [String: @Sendable (ColumnHint) -> Void] = [:]
 
     public init() {}
+
+    public func setObserver(for tableName: String, _ handler: (@Sendable (ColumnHint) -> Void)?) {
+        lock.lock()
+        observers[tableName] = handler
+        lock.unlock()
+    }
 
     public func getCachedHint(for tableName: String) -> ColumnHint? {
         lock.lock()
@@ -18,8 +25,9 @@ public final class ColumnSampler: @unchecked Sendable {
     public func updateHint(for tableName: String, hint: ColumnHint) {
         lock.lock()
         hints[tableName] = hint
+        let observer = observers[tableName]
         lock.unlock()
-        onHintUpdated?(tableName, hint)
+        observer?(hint)
     }
 
     public func isStarted(for tableName: String) -> Bool {
@@ -72,7 +80,7 @@ extension Doc {
             return
         }
 
-        let (lo, hi, ok) = bounds(for: tableName)
+        let (lo, hi, ok) = bounds(for: tableName, using: bg)
         guard ok, hi >= lo else {
             columnSampler.updateHint(for: tableName, hint: ColumnHint(table: tableName, known: true, done: true, samples: []))
             return

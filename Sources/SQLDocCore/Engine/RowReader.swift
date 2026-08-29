@@ -29,10 +29,37 @@ extension Doc {
         var withRowID = false
 
         if let sortCol = window.sort, !sortCol.isEmpty {
-            let dir = window.desc ? " DESC" : " ASC"
-            query = "SELECT \(colExpr) FROM \(ts.quoted) ORDER BY \(Doc.quoteIdent(sortCol))\(dir) LIMIT ? OFFSET ?"
-            args = [limit, offset]
-            path = "sorted-offset"
+            let q = Doc.quoteIdent(sortCol)
+            // Sort as a number when the caller asked and the storage class allows it.
+            let sortExpr = window.sortNumeric ? "CAST(\(q) AS REAL)" : q
+            let dir = window.desc ? "DESC" : "ASC"
+            // rowid always ascending: a deterministic total order so equal keys
+            // never reshuffle between pages.
+            if t.hasRowID {
+                let keysetAnchor = window.afterSortValue.flatMap { $0.isNull ? nil : $0 }
+                if window.useAfter, let anchor = keysetAnchor {
+                    let cmp = window.desc ? "<" : ">"
+                    let anchorBind: Any = window.sortNumeric
+                        ? (anchor.doubleValue ?? Double(anchor.textValue ?? "") ?? 0)
+                        : anchor.bindable
+                    query = """
+                        SELECT rowid, \(colExpr) FROM \(ts.quoted) \
+                        WHERE \(sortExpr) \(cmp) ? OR (\(sortExpr) = ? AND rowid > ?) \
+                        ORDER BY \(sortExpr) \(dir), rowid ASC LIMIT ?
+                        """
+                    args = [anchorBind, anchorBind, window.after, limit]
+                    path = "sorted-keyset"
+                } else {
+                    query = "SELECT rowid, \(colExpr) FROM \(ts.quoted) ORDER BY \(sortExpr) \(dir), rowid ASC LIMIT ? OFFSET ?"
+                    args = [limit, offset]
+                    path = "sorted-offset"
+                }
+                withRowID = true
+            } else {
+                query = "SELECT \(colExpr) FROM \(ts.quoted) ORDER BY \(sortExpr) \(dir) LIMIT ? OFFSET ?"
+                args = [limit, offset]
+                path = "sorted-offset"
+            }
         } else if window.forceOffset {
             query = "SELECT \(colExpr) FROM \(ts.quoted) LIMIT ? OFFSET ?"
             args = [limit, offset]
@@ -77,6 +104,15 @@ extension Doc {
             rowValues = rawRows
         }
 
+        // Build display-ready, length-clamped strings here (off the main thread),
+        // so the grid never lays out a huge value or reruns a NumberFormatter.
+        let cellText: [[CellText]] = rowValues.map { row in
+            row.map { v in
+                let c = v.gridCell(maxChars: Page.cellTextMaxChars)
+                return CellText(text: c.text, truncated: c.truncated)
+            }
+        }
+
         let elapsedNanos = DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds
         let micros = Int64(elapsedNanos / 1000)
 
@@ -84,6 +120,7 @@ extension Doc {
             table: window.table,
             columns: cols,
             rows: rowValues,
+            text: cellText,
             rowIDs: rowIDs,
             start: startOffset,
             approx: isApprox,

@@ -6,113 +6,122 @@ public struct StatusBarView: View {
     @ObservedObject var tableVM: TableViewModel
 
     public var body: some View {
-        HStack(spacing: 12) {
-            // Timing badge with fast / slow color threshold
+        HStack(spacing: 10) {
             timingBadge
 
-            Divider()
-                .frame(height: 12)
+            Divider().frame(height: 12)
 
-            // Row position
-            if let page = tableVM.currentPage {
-                let startRow = page.start + 1
-                let endRow = page.start + Int64(page.rows.count)
-                let totalStr = tableVM.tableCount.displayString
-                let approxMarker = page.approx ? "~" : ""
+            pager
 
-                Text("Rows \(startRow)–\(endRow) of \(totalStr)\(approxMarker)")
-                    .font(.system(size: 11, weight: .regular))
+            if tableVM.isSorting {
+                Label("sorting…", systemImage: "arrow.up.arrow.down")
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
+            } else if let sortCol = tableVM.sortColumn {
+                HStack(spacing: 3) {
+                    Image(systemName: tableVM.isSortDesc ? "arrow.down" : "arrow.up")
+                        .font(.system(size: 9, weight: .bold))
+                    Text(sortCol + (tableVM.sortNumeric ? " (#)" : ""))
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(.accentColor)
             }
 
-            // Selected cell coordinate indicator
             if let sel = appVM.selectedCell, let page = tableVM.currentPage, sel.row < page.rows.count {
-                Divider()
-                    .frame(height: 12)
-
+                Divider().frame(height: 12)
                 let colName = sel.col < tableVM.columns.count ? tableVM.columns[sel.col].name : ""
                 let rowNum = page.start + Int64(sel.row) + 1
-
-                HStack(spacing: 4) {
-                    Text("Selected: Row \(rowNum), Col '\(colName)'")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.accentColor)
-
-                    Button(action: {
-                        if sel.col < tableVM.columns.count {
-                            let col = tableVM.columns[sel.col]
-                            let val = sel.col < page.rows[sel.row].count ? page.rows[sel.row][sel.col] : SQLiteValue.null
-                            appVM.inspectingCell = CellInspectInfo(
-                                tableName: tableVM.tableName,
-                                colName: col.name,
-                                colType: col.type,
-                                value: val,
-                                rowOrdinal: rowNum
-                            )
-                        }
-                    }) {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Inspect selected cell (Space or ⌘I)")
-                }
+                Text("R\(rowNum) · \(colName)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.accentColor)
             }
 
             Spacer()
 
-            // File path
             if let doc = appVM.activeDocEntry {
                 HStack(spacing: 4) {
                     Image(systemName: "externaldrive")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                     Text(doc.path)
-                        .font(.system(size: 11, weight: .regular))
+                        .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
+                .layoutPriority(-1)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color(NSColor.windowBackgroundColor).opacity(0.8))
-        .overlay(
-            Divider(), alignment: .top
-        )
+        .padding(.vertical, 4)
+        .background(Color(NSColor.windowBackgroundColor))
+        .overlay(Divider(), alignment: .top)
     }
+
+    // MARK: - Pager
+
+    private var pager: some View {
+        HStack(spacing: 6) {
+            pagerButton("backward.end.fill", help: "First page (Home)",
+                        disabled: tableVM.currentOffset <= 0) { tableVM.loadPage(offset: 0) }
+            pagerButton("chevron.left", help: "Previous 100 (Page Up)",
+                        disabled: tableVM.currentOffset <= 0) { tableVM.previousPage() }
+
+            if let page = tableVM.currentPage {
+                let startRow = page.start + 1
+                let endRow = page.start + Int64(page.rows.count)
+                let approx = page.approx ? "~" : ""
+                Text("\(startRow)–\(endRow) / \(tableVM.tableCount.displayString)\(approx)")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .frame(minWidth: 90)
+            }
+
+            pagerButton("chevron.right", help: "Next 100 (Page Down)",
+                        disabled: tableVM.currentPage?.rows.isEmpty ?? true) { tableVM.nextPage() }
+            pagerButton("forward.end.fill", help: "Last page (End)",
+                        disabled: false) { tableVM.loadLastPage() }
+        }
+    }
+
+    private func pagerButton(_ icon: String, help: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+                .frame(width: 18, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .foregroundColor(disabled ? .secondary.opacity(0.4) : .secondary)
+        .help(help)
+    }
+
+    // MARK: - Timing
 
     private var timingBadge: some View {
         let isSlow = tableVM.lastTimingMicros >= Int64(BehaviorConfig.timingSlowThresholdUs)
-        let timingColor = isSlow ? AppTheme.color(from: DesignToken.statusWarn.light) : AppTheme.color(from: DesignToken.statusOk.light)
-        let iconName = isSlow ? "bolt.trianglebadge.exclamationmark.fill" : "bolt.fill"
-        let timingText = formatMicros(tableVM.lastTimingMicros)
-        let explanation = isSlow ? "Query took \(timingText) (slow threshold: 15ms) via '\(tableVM.lastQueryPath)'" : "Query took \(timingText) via '\(tableVM.lastQueryPath)'"
-
+        let color = isSlow ? AppTheme.color(from: DesignToken.statusWarn.light)
+                           : AppTheme.color(from: DesignToken.statusOk.light)
+        let text = formatMicros(tableVM.lastTimingMicros)
         return HStack(spacing: 4) {
-            Image(systemName: iconName)
+            Image(systemName: isSlow ? "bolt.trianglebadge.exclamationmark.fill" : "bolt.fill")
                 .font(.system(size: 10))
-                .foregroundColor(timingColor)
-
-            Text("\(timingText) · \(tableVM.lastQueryPath)")
+                .foregroundColor(color)
+            Text("\(text) · \(tableVM.lastQueryPath)")
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundColor(timingColor)
+                .foregroundColor(color)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(timingColor.opacity(0.12))
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(color.opacity(0.12))
         .cornerRadius(4)
-        .help(explanation)
+        .help(isSlow ? "Query took \(text) (slow ≥ 15 ms) via '\(tableVM.lastQueryPath)'"
+                     : "Query took \(text) via '\(tableVM.lastQueryPath)'")
     }
 
     private func formatMicros(_ micros: Int64) -> String {
-        if micros < 1000 {
-            return "\(micros) µs"
-        } else if micros < 1_000_000 {
-            return String(format: "%.2f ms", Double(micros) / 1000.0)
-        } else {
-            return String(format: "%.2f s", Double(micros) / 1_000_000.0)
-        }
+        if micros < 1000 { return "\(micros) µs" }
+        if micros < 1_000_000 { return String(format: "%.2f ms", Double(micros) / 1000.0) }
+        return String(format: "%.2f s", Double(micros) / 1_000_000.0)
     }
 }

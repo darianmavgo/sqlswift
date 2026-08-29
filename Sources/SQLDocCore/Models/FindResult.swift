@@ -1,16 +1,15 @@
 import Foundation
 
-/// Match is one search hit inside a table.
+/// Match is one search hit inside a table. Carries only what the UI needs to
+/// locate it — the row's data is fetched with the page it lands on.
 public struct FindMatch: Identifiable, Equatable, Hashable, Sendable {
     public var id: String { "\(rowID):\(column)" }
     public let rowID: Int64
     public let column: Int
-    public let row: [SQLiteValue]
 
-    public init(rowID: Int64, column: Int, row: [SQLiteValue]) {
+    public init(rowID: Int64, column: Int) {
         self.rowID = rowID
         self.column = column
-        self.row = row
     }
 }
 

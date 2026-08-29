@@ -39,3 +39,51 @@ public struct AppTheme {
         color(from: isDark ? token.dark : token.light)
     }
 }
+
+/// Resolved grid colours for the current appearance, straight from the generated
+/// `DesignToken` palette. One value, computed once per appearance, instead of the
+/// ad-hoc `Color(NSColor.controlBackgroundColor).opacity(…)` guesses scattered
+/// through the grid.
+public struct GridPalette: Equatable, Sendable {
+    public let ink: Color          // primary text
+    public let dim: Color          // secondary text: headers, NULL, gutter
+    public let rule: Color         // hairline gridlines
+    public let ruleStrong: Color   // header underline / panel edges
+    public let head: Color         // header + gutter + status fill
+    public let page: Color         // cell surface
+    public let stripe: Color       // zebra row tint
+    public let selectionFill: Color
+    public let matchFill: Color
+    public let activeMatchFill: Color
+    public let markBg: Color
+    public let markFg: Color
+
+    public static func resolve(dark: Bool, accent: Color) -> GridPalette {
+        func c(_ t: ColorToken) -> Color { AppTheme.color(for: t, isDark: dark) }
+        return GridPalette(
+            ink: c(DesignToken.ink),
+            dim: c(DesignToken.dim),
+            rule: c(DesignToken.rule),
+            ruleStrong: c(DesignToken.ruleStrong),
+            head: c(DesignToken.head),
+            page: c(DesignToken.page),
+            stripe: c(DesignToken.head).opacity(DesignToken.rowStripeMix),
+            selectionFill: accent.opacity(0.14),
+            matchFill: accent.opacity(DesignToken.hitMix),
+            activeMatchFill: accent.opacity(DesignToken.cursorMix),
+            markBg: c(DesignToken.markBg),
+            markFg: c(DesignToken.markFg)
+        )
+    }
+}
+
+private struct GridPaletteKey: EnvironmentKey {
+    static let defaultValue = GridPalette.resolve(dark: false, accent: .accentColor)
+}
+
+public extension EnvironmentValues {
+    var gridPalette: GridPalette {
+        get { self[GridPaletteKey.self] }
+        set { self[GridPaletteKey.self] = newValue }
+    }
+}

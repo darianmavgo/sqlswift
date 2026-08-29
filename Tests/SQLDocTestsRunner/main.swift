@@ -108,6 +108,14 @@ func runAllTests() async {
         let res2 = try doc.find(table: "logs", query: "95%")
         expectEqual(res2.matches.count, 1)
         expectEqual(res2.matches[0].rowID, 2)
+
+        // Column-scoped: "INFO" appears in `level` for rows 1 & 4; restricting to
+        // `msg` finds nothing, and the reported column is the scoped one.
+        let scopedMsg = try doc.find(table: "logs", query: "INFO", column: "msg")
+        expectEqual(scopedMsg.matches.count, 0)
+        let scopedLevel = try doc.find(table: "logs", query: "INFO", column: "level")
+        expectEqual(scopedLevel.matches.count, 2)
+        expectEqual(scopedLevel.matches[0].column, 1) // columns: id(0), level(1), msg(2)
     }
 
     // Keyset Paging Tests
@@ -144,6 +152,67 @@ func runAllTests() async {
 
         let page4 = try doc.rows(window: Window(table: "sensor_readings", limit: 20, sort: "temp", desc: true))
         expectEqual(page4.rows.count, 20)
+    }
+
+    // Sorted keyset paging: stable order + fast forward seek without deep OFFSET
+    await test("SortedKeyset: stable order and keyset forward paging") {
+        let tempDir = NSTemporaryDirectory()
+        let tempDBPath = (tempDir as NSString).appendingPathComponent("sortkey_test_\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(atPath: tempDBPath) }
+
+        let conn = try SQLiteConnection(path: tempDBPath, readOnly: false)
+        try conn.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, bucket INTEGER, label TEXT)")
+        try conn.exec("BEGIN TRANSACTION")
+        for i in 1...600 {
+            // Many ties on `bucket` so the rowid tiebreaker matters.
+            try conn.exec("INSERT INTO t VALUES (\(i), \(i % 5), 'row-\(i)')")
+        }
+        try conn.exec("COMMIT")
+        conn.close()
+
+        let doc = try Doc.open(path: tempDBPath)
+        defer { doc.close() }
+
+        // First page, ascending by the heavily-tied column.
+        let p1 = try doc.rows(window: Window(table: "t", limit: 50, sort: "bucket", desc: false, sortNumeric: true))
+        expectEqual(p1.rows.count, 50)
+        expectEqual(p1.path, "sorted-offset")
+        // Column order preserved (id, bucket, label): first 50 rows are bucket 0.
+        expectEqual(p1.rows.first?[1], .integer(0))
+
+        // Keyset forward: seek past the last row's (bucket, rowid).
+        let anchorBucket = p1.rows.last![1]
+        let anchorRowID = p1.rowIDs.last!
+        let p2 = try doc.rows(window: Window(
+            table: "t", limit: 50, after: anchorRowID, useAfter: true,
+            offset: 50, sort: "bucket", desc: false, sortNumeric: true,
+            afterSortValue: anchorBucket
+        ))
+        expectEqual(p2.path, "sorted-keyset")
+        expectEqual(p2.rows.count, 50)
+        // No overlap with page 1 and strictly ordered by (bucket, rowid).
+        let p1IDs = Set(p1.rowIDs)
+        expectTrue(!p2.rowIDs.contains { p1IDs.contains($0) })
+
+        // Full offset walk vs keyset walk must produce the same rowids.
+        var keysetIDs: [Int64] = p1.rowIDs
+        var cursorRowID = anchorRowID
+        var cursorVal = anchorBucket
+        var off: Int64 = 50
+        for _ in 0..<11 {
+            let pg = try doc.rows(window: Window(
+                table: "t", limit: 50, after: cursorRowID, useAfter: true,
+                offset: off, sort: "bucket", desc: false, sortNumeric: true,
+                afterSortValue: cursorVal
+            ))
+            if pg.rows.isEmpty { break }
+            keysetIDs.append(contentsOf: pg.rowIDs)
+            cursorRowID = pg.rowIDs.last!
+            cursorVal = pg.rows.last![1]
+            off += 50
+        }
+        expectEqual(keysetIDs.count, 600)
+        expectEqual(Set(keysetIDs).count, 600)
     }
 
     // SQLite Connection Tests

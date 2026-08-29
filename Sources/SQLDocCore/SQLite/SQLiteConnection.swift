@@ -1,6 +1,10 @@
 import Foundation
 import SQLite3
 
+/// Tells SQLite to copy a bound blob/text immediately, so we don't have to keep
+/// the Swift buffer alive until the statement is stepped/finalized.
+private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
 /// Low-level wrapper around a single SQLite3 connection handle (sqlite3*).
 /// Designed for high-throughput read-only queries with zero memory bloat.
 public final class SQLiteConnection: @unchecked Sendable {
@@ -215,11 +219,11 @@ public final class SQLiteConnection: @unchecked Sendable {
             case let dblVal as Double:
                 rc = sqlite3_bind_double(stmt, idx, dblVal)
             case let strVal as String:
-                rc = sqlite3_bind_text(stmt, idx, NSString(string: strVal).utf8String, -1, nil)
+                rc = sqlite3_bind_text(stmt, idx, strVal, -1, SQLITE_TRANSIENT)
             case is NSNull:
                 rc = sqlite3_bind_null(stmt, idx)
             default:
-                rc = sqlite3_bind_text(stmt, idx, NSString(string: String(describing: arg)).utf8String, -1, nil)
+                rc = sqlite3_bind_text(stmt, idx, String(describing: arg), -1, SQLITE_TRANSIENT)
             }
             if rc != SQLITE_OK {
                 let msg = String(cString: sqlite3_errmsg(db))

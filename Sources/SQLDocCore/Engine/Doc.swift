@@ -70,7 +70,23 @@ public final class Doc: @unchecked Sendable {
     public let options: DocOptions
 
     public let fg: SQLiteConnection
-    public let bg: SQLiteConnection
+
+    // The background connection is only needed once work that isn't first paint
+    // starts (exact counts, column sampling, find). Opening it — with its mmap and
+    // cache pragmas — is deferred off the open path.
+    private let bgLock = NSLock()
+    private var _bg: SQLiteConnection?
+    public var bg: SQLiteConnection {
+        bgLock.lock()
+        defer { bgLock.unlock() }
+        if let existing = _bg { return existing }
+        if let opened = try? SQLiteConnection(path: path, readOnly: true, immutable: options.isImmutable) {
+            _bg = opened
+            return opened
+        }
+        // Degrade to sharing the foreground connection rather than crashing.
+        return fg
+    }
 
     private let stateLock = NSLock()
     private var states: [String: TableState] = [:]
@@ -111,16 +127,14 @@ public final class Doc: @unchecked Sendable {
         let modified = (attrs[.modificationDate] as? Date) ?? Date()
 
         let fg = try SQLiteConnection(path: resolvedPath, readOnly: true, immutable: options.isImmutable)
-        let bg = try SQLiteConnection(path: resolvedPath, readOnly: true, immutable: options.isImmutable)
 
         // Verify valid SQLite header via cheap pragma
         guard let _ = try? fg.queryRow("PRAGMA journal_mode") else {
             fg.close()
-            bg.close()
             throw SQLiteError.notADatabase(path: resolvedPath)
         }
 
-        let doc = Doc(path: resolvedPath, size: size, modified: modified, options: options, fg: fg, bg: bg)
+        let doc = Doc(path: resolvedPath, size: size, modified: modified, options: options, fg: fg)
         try doc.discover()
         doc.loadStyle()
         return doc
@@ -131,15 +145,13 @@ public final class Doc: @unchecked Sendable {
         size: Int64,
         modified: Date,
         options: DocOptions,
-        fg: SQLiteConnection,
-        bg: SQLiteConnection
+        fg: SQLiteConnection
     ) {
         self.path = path
         self.size = size
         self.modified = modified
         self.options = options
         self.fg = fg
-        self.bg = bg
 
         self.counterWorker = CounterWorker()
         self.columnSampler = ColumnSampler()
@@ -152,7 +164,10 @@ public final class Doc: @unchecked Sendable {
 
     public func close() {
         fg.close()
-        bg.close()
+        bgLock.lock()
+        _bg?.close()
+        _bg = nil
+        bgLock.unlock()
     }
 
     public func touch() {
@@ -339,11 +354,14 @@ public final class Doc: @unchecked Sendable {
     // MARK: - Bounds Calculation
 
     /// Returns min and max rowid in O(1) index seeks using two scalar subqueries.
-    public func bounds(for tableName: String) -> (min: Int64, max: Int64, ok: Bool) {
+    /// Pass `using:` a background connection when calling off the main thread so
+    /// the first-paint foreground connection isn't contended.
+    public func bounds(for tableName: String, using conn: SQLiteConnection? = nil) -> (min: Int64, max: Int64, ok: Bool) {
         let ts = tableState(for: tableName)
+        let connection = conn ?? fg
         return ts.getBounds {
             let q = "SELECT (SELECT min(rowid) FROM \(ts.quoted)), (SELECT max(rowid) FROM \(ts.quoted))"
-            guard let row = try? fg.queryRow(q), row.count >= 2,
+            guard let row = try? connection.queryRow(q), row.count >= 2,
                   let minVal = row[0].intValue,
                   let maxVal = row[1].intValue else {
                 return (0, 0, false)
@@ -355,7 +373,7 @@ public final class Doc: @unchecked Sendable {
     /// Computes the exact row position (ordinal) of a rowid within the table.
     public func ordinal(for tableName: String, rowID: Int64) -> Int64 {
         guard let t = table(named: tableName), t.hasRowID else { return 0 }
-        let (lo, hi, ok) = bounds(for: tableName)
+        let (lo, hi, ok) = bounds(for: tableName, using: bg)
         guard ok else { return 0 }
 
         let count = count(for: tableName)

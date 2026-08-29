@@ -8,8 +8,9 @@ public final class Finder: @unchecked Sendable {
 extension Doc {
     public static let findChunk: Int64 = 250_000
 
-    /// Searches every column of a table for a substring, case-insensitively, resuming from a rowid cursor.
-    public func find(table tableName: String, query q: String, from fromRowID: Int64 = 0, limit: Int = 50) throws -> FindResult {
+    /// Searches a table for a substring, case-insensitively, resuming from a rowid
+    /// cursor. Pass `column` to restrict the scan (and the highlight) to one column.
+    public func find(table tableName: String, query q: String, from fromRowID: Int64 = 0, limit: Int = 50, column: String? = nil) throws -> FindResult {
         let startTime = DispatchTime.now()
 
         guard let t = table(named: tableName), !q.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -17,9 +18,18 @@ extension Doc {
         }
 
         let ts = tableState(for: tableName)
-        let (cols, colExpr) = try ts.getColumns {
+        let (allCols, _) = try ts.getColumns {
             try columns(for: tableName)
         }
+        // Column-scoped search narrows both the SQL and the reported match column.
+        let cols: [Column]
+        if let column, let idx = allCols.firstIndex(where: { $0.name == column }) {
+            cols = [allCols[idx]]
+        } else {
+            cols = allCols
+        }
+        let colExpr = cols.map { Doc.quoteIdent($0.name) }.joined(separator: ", ")
+        let columnOffset = (column != nil) ? (allCols.firstIndex(where: { $0.name == column }) ?? 0) : 0
 
         let cleanLimit = min(max(1, limit), 200)
 
@@ -32,7 +42,8 @@ extension Doc {
                 whereClause: "",
                 limit: cleanLimit,
                 baseArgs: [],
-                searchNeedle: q
+                searchNeedle: q,
+                columnOffset: columnOffset
             )
             let elapsed = DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds
             return FindResult(
@@ -45,7 +56,7 @@ extension Doc {
             )
         }
 
-        let (lo, hi, ok) = bounds(for: tableName)
+        let (lo, hi, ok) = bounds(for: tableName, using: bg)
         guard ok, hi >= lo else {
             return FindResult(matches: [], next: 0, done: true, scanned: 0, progress: 1.0, micros: 0)
         }
@@ -72,7 +83,8 @@ extension Doc {
             whereClause: whereClause,
             limit: cleanLimit,
             baseArgs: baseArgs,
-            searchNeedle: q
+            searchNeedle: q,
+            columnOffset: columnOffset
         )
 
         let span = hi - lo + 1
@@ -101,7 +113,8 @@ extension Doc {
         whereClause: String,
         limit: Int,
         baseArgs: [Any],
-        searchNeedle: String
+        searchNeedle: String,
+        columnOffset: Int
     ) throws -> [FindMatch] {
         var query = "SELECT rowid, \(colExpr) FROM \(ts.quoted) WHERE \(whereClause)("
         var args = baseArgs
@@ -121,17 +134,16 @@ extension Doc {
 
         for row in rawRows {
             guard let first = row.first, let rowID = first.intValue else { continue }
-            let cells = Array(row.dropFirst())
             var matchedCol = -1
 
-            for (colIdx, cellVal) in cells.enumerated() {
+            for (colIdx, cellVal) in row.dropFirst().enumerated() {
                 if let text = cellVal.textValue?.lowercased(), text.contains(lowerNeedle) {
-                    matchedCol = colIdx
+                    matchedCol = columnOffset + colIdx
                     break
                 }
             }
 
-            matches.append(FindMatch(rowID: rowID, column: matchedCol, row: cells))
+            matches.append(FindMatch(rowID: rowID, column: matchedCol))
         }
 
         return matches

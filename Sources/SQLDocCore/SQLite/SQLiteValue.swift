@@ -1,6 +1,22 @@
 import Foundation
 import SQLite3
 
+/// Shared, thread-safe integer grouping formatter. `NumberFormatter.localizedString`
+/// builds a fresh formatter on every call, which is far too slow to run per cell
+/// per frame — this caches one instance.
+enum SQLiteValueFormat {
+    static let grouped: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.usesGroupingSeparator = true
+        return f
+    }()
+
+    static func integerString(_ v: Int64) -> String {
+        grouped.string(from: NSNumber(value: v)) ?? String(v)
+    }
+}
+
 /// Strongly-typed SQLite cell value supporting zero-copy and lazy representations.
 public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible {
     case null
@@ -29,6 +45,18 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
         case .real(let v): return v
         case .integer(let v): return Double(v)
         default: return nil
+        }
+    }
+
+    /// The underlying scalar in a form `SQLiteConnection.bindArgs` understands,
+    /// for use as a query parameter (keyset anchors, etc.).
+    public var bindable: Any {
+        switch self {
+        case .null: return NSNull()
+        case .integer(let v): return v
+        case .real(let v): return v
+        case .text(let s): return s
+        case .blob: return NSNull()
         }
     }
 
@@ -67,13 +95,37 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
         case .null:
             return "NULL"
         case .integer(let v):
-            return NumberFormatter.localizedString(from: NSNumber(value: v), number: .decimal)
+            return SQLiteValueFormat.integerString(v)
         case .real(let v):
             return String(format: "%g", v)
         case .text(let s):
             return s
         case .blob(let count):
             return "◼ \(formatBytes(count))"
+        }
+    }
+
+    /// A cell string prepared for the grid: display text clamped to `maxChars`
+    /// so the view never has to lay out a multi-megabyte string, plus a flag
+    /// telling the view the value was clipped (for a hover hint / inspector cue).
+    public func gridCell(maxChars: Int) -> (text: String, truncated: Bool) {
+        switch self {
+        case .text(let s):
+            if s.count > maxChars {
+                return (String(s.prefix(maxChars)).trimmingCharacters(in: .newlines) + "…", true)
+            }
+            // Collapse hard line breaks so a single grid row stays one visual line.
+            if s.contains("\n") || s.contains("\r") {
+                let flattened = s.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).joined(separator: " ")
+                return (flattened, flattened.count != s.count)
+            }
+            return (s, false)
+        default:
+            let t = displayText
+            if t.count > maxChars {
+                return (String(t.prefix(maxChars)) + "…", true)
+            }
+            return (t, false)
         }
     }
 

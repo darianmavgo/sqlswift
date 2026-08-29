@@ -5,9 +5,17 @@ public final class CounterWorker: @unchecked Sendable {
     private let lock = NSLock()
     private var counts: [String: TableCount] = [:]
     private var activeTasks: [String: Task<Void, Never>] = [:]
-    public var onCountUpdated: (@Sendable (String, TableCount) -> Void)?
+    // Keyed by table so several open tables can each observe their own count
+    // (a single shared closure meant only the last table registered won).
+    private var observers: [String: @Sendable (TableCount) -> Void] = [:]
 
     public init() {}
+
+    public func setObserver(for tableName: String, _ handler: (@Sendable (TableCount) -> Void)?) {
+        lock.lock()
+        observers[tableName] = handler
+        lock.unlock()
+    }
 
     public func getCachedCount(for tableName: String) -> TableCount? {
         lock.lock()
@@ -18,8 +26,9 @@ public final class CounterWorker: @unchecked Sendable {
     public func updateCount(for tableName: String, count: TableCount) {
         lock.lock()
         counts[tableName] = count
+        let observer = observers[tableName]
         lock.unlock()
-        onCountUpdated?(tableName, count)
+        observer?(count)
     }
 
     public func isStarted(for tableName: String) -> Bool {
