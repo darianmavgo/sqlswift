@@ -7,16 +7,8 @@ public struct StatusBarView: View {
 
     public var body: some View {
         HStack(spacing: 12) {
-            // Timing badge
-            HStack(spacing: 4) {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 10))
-                    .foregroundColor(.accentColor)
-
-                Text("\(formatMicros(tableVM.lastTimingMicros)) · \(tableVM.lastQueryPath)")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(.secondary)
-            }
+            // Timing badge with fast / slow color threshold
+            timingBadge
 
             Divider()
                 .frame(height: 12)
@@ -31,6 +23,40 @@ public struct StatusBarView: View {
                 Text("Rows \(startRow)–\(endRow) of \(totalStr)\(approxMarker)")
                     .font(.system(size: 11, weight: .regular))
                     .foregroundColor(.secondary)
+            }
+
+            // Selected cell coordinate indicator
+            if let sel = appVM.selectedCell, let page = tableVM.currentPage, sel.row < page.rows.count {
+                Divider()
+                    .frame(height: 12)
+
+                let colName = sel.col < tableVM.columns.count ? tableVM.columns[sel.col].name : ""
+                let rowNum = page.start + Int64(sel.row) + 1
+
+                HStack(spacing: 4) {
+                    Text("Selected: Row \(rowNum), Col '\(colName)'")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.accentColor)
+
+                    Button(action: {
+                        if sel.col < tableVM.columns.count {
+                            let col = tableVM.columns[sel.col]
+                            let val = sel.col < page.rows[sel.row].count ? page.rows[sel.row][sel.col] : SQLiteValue.null
+                            appVM.inspectingCell = CellInspectInfo(
+                                tableName: tableVM.tableName,
+                                colName: col.name,
+                                colType: col.type,
+                                value: val,
+                                rowOrdinal: rowNum
+                            )
+                        }
+                    }) {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Inspect selected cell (Space or ⌘I)")
+                }
             }
 
             Spacer()
@@ -55,6 +81,29 @@ public struct StatusBarView: View {
         .overlay(
             Divider(), alignment: .top
         )
+    }
+
+    private var timingBadge: some View {
+        let isSlow = tableVM.lastTimingMicros >= Int64(BehaviorConfig.timingSlowThresholdUs)
+        let timingColor = isSlow ? AppTheme.color(from: DesignToken.statusWarn.light) : AppTheme.color(from: DesignToken.statusOk.light)
+        let iconName = isSlow ? "bolt.trianglebadge.exclamationmark.fill" : "bolt.fill"
+        let timingText = formatMicros(tableVM.lastTimingMicros)
+        let explanation = isSlow ? "Query took \(timingText) (slow threshold: 15ms) via '\(tableVM.lastQueryPath)'" : "Query took \(timingText) via '\(tableVM.lastQueryPath)'"
+
+        return HStack(spacing: 4) {
+            Image(systemName: iconName)
+                .font(.system(size: 10))
+                .foregroundColor(timingColor)
+
+            Text("\(timingText) · \(tableVM.lastQueryPath)")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(timingColor)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(timingColor.opacity(0.12))
+        .cornerRadius(4)
+        .help(explanation)
     }
 
     private func formatMicros(_ micros: Int64) -> String {

@@ -50,7 +50,7 @@ release: generate
 	swift build -c release
 
 test: generate
-	swift test
+	swift run SQLDocTestsRunner
 
 # Assemble bin/sqldoc.app from a fresh release build.
 #   .build/Info.plist          rendered by ConfigGen from sqldoc.db (make generate)

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import SQLDocCore
 
 public struct AppTheme {
     public static let primaryFont = Font.system(.body, design: .default)
@@ -32,5 +33,9 @@ public struct AppTheme {
         let g = CGFloat((rgb >> 8) & 0xFF) / 255.0
         let b = CGFloat(rgb & 0xFF) / 255.0
         return NSColor(srgbRed: r, green: g, blue: b, alpha: 1.0)
+    }
+
+    public static func color(for token: ColorToken, isDark: Bool) -> Color {
+        color(from: isDark ? token.dark : token.light)
     }
 }

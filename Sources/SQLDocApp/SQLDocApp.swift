@@ -15,6 +15,15 @@ struct SQLDocApp: App {
                     appVM.open(url: url)
                 }
                 .onAppear {
+                    // Maximize window to fill screen on launch (matching fillScreen behavior)
+                    DispatchQueue.main.async {
+                        if let window = NSApplication.shared.windows.first(where: { $0.canBecomeMain }) {
+                            if let screen = window.screen ?? NSScreen.main {
+                                window.setFrame(screen.visibleFrame, display: true, animate: false)
+                            }
+                        }
+                    }
+
                     // Check if files were passed via command line arguments
                     let cliArgs = Array(CommandLine.arguments.dropFirst())
                     for arg in cliArgs where !arg.hasPrefix("-") {
@@ -47,6 +56,13 @@ struct SQLDocApp: App {
                 .disabled(appVM.activeDocEntry == nil)
             }
 
+            CommandGroup(replacing: .pasteboard) {
+                Button("Paste File Path to Open") {
+                    appVM.pasteFromClipboard()
+                }
+                .keyboardShortcut("v", modifiers: .command)
+            }
+
             CommandGroup(after: .textEditing) {
                 Button("Find in Table…") {
                     appVM.isFindBarVisible.toggle()
@@ -59,8 +75,22 @@ struct SQLDocApp: App {
                 Button("Toggle Gallery View") {
                     appVM.isGalleryView.toggle()
                 }
-                .keyboardShortcut("g", modifiers: [.command])
+                .keyboardShortcut("g", modifiers: [.option, .command])
                 .disabled(appVM.activeDocEntry == nil)
+
+                Divider()
+
+                Menu("Appearance") {
+                    Button("Match System") {
+                        appVM.setThemeMode(.system)
+                    }
+                    Button("Light Mode") {
+                        appVM.setThemeMode(.light)
+                    }
+                    Button("Dark Mode") {
+                        appVM.setThemeMode(.dark)
+                    }
+                }
 
                 Divider()
 
@@ -84,6 +114,17 @@ struct SQLDocApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Ensure window bounds to screen visible frame on launch
+        DispatchQueue.main.async {
+            for window in NSApplication.shared.windows {
+                if let screen = window.screen ?? NSScreen.main {
+                    window.setFrame(screen.visibleFrame, display: true, animate: false)
+                }
+            }
+        }
+    }
+
     func application(_ application: NSApplication, openFiles filenames: [String]) {
         for filename in filenames {
             let path = (filename as NSString).expandingTildeInPath

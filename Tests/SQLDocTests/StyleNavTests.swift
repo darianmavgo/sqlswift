@@ -1,8 +1,10 @@
-import XCTest
+import Testing
 import Foundation
 @testable import SQLDocCore
 
-final class StyleNavTests: XCTestCase {
+@Suite("StyleNavTests")
+struct StyleNavTests {
+    @Test("Test Style and Nav overrides")
     func testStyleAndNavOverrides() throws {
         let tempDir = NSTemporaryDirectory()
         let tempDBPath = (tempDir as NSString).appendingPathComponent("style_test_\(UUID().uuidString).db")
@@ -21,19 +23,19 @@ final class StyleNavTests: XCTestCase {
         defer { doc.close() }
 
         // Verify _style
-        XCTAssertEqual(doc.style.title, "Sensor Dashboard")
-        XCTAssertEqual(doc.style.accent, "#10b981")
-        XCTAssertEqual(doc.style.theme, "dark")
+        #expect(doc.style.title == "Sensor Dashboard")
+        #expect(doc.style.accent == "#10b981")
+        #expect(doc.style.theme == "dark")
 
         // Verify _nav and tables
         let visible = doc.tables.filter { !$0.hidden }
-        XCTAssertEqual(visible.count, 1)
-        XCTAssertEqual(visible[0].name, "readings")
-        XCTAssertEqual(visible[0].label, "Live Sensor Readings")
+        #expect(visible.count == 1)
+        #expect(visible[0].name == "readings")
+        #expect(visible[0].label == "Live Sensor Readings")
 
         // Internal metadata tables starting with _ are hidden
         let styleTable = doc.tables.first { $0.name == "_style" }
-        XCTAssertNotNil(styleTable)
-        XCTAssertEqual(styleTable?.hidden, true)
+        #expect(styleTable != nil)
+        #expect(styleTable?.hidden == true)
     }
 }

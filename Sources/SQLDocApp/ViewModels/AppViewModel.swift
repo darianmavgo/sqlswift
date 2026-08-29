@@ -2,6 +2,23 @@ import SwiftUI
 import AppKit
 import SQLDocCore
 
+public struct CellInspectInfo: Identifiable, Sendable {
+    public let id = UUID()
+    public let tableName: String
+    public let colName: String
+    public let colType: String
+    public let value: SQLiteValue
+    public let rowOrdinal: Int64
+
+    public init(tableName: String, colName: String, colType: String, value: SQLiteValue, rowOrdinal: Int64) {
+        self.tableName = tableName
+        self.colName = colName
+        self.colType = colType
+        self.value = value
+        self.rowOrdinal = rowOrdinal
+    }
+}
+
 @MainActor
 public final class AppViewModel: ObservableObject {
     @Published public var activeDocEntry: DocEntry?
@@ -14,11 +31,50 @@ public final class AppViewModel: ObservableObject {
     @Published public var errorMessage: String? = nil
     @Published public var isDropTargeted: Bool = false
 
+    // State persistence & Settings
+    @Published public var themeMode: AppThemeMode = .system {
+        didSet {
+            StatePersistenceManager.shared.themeMode = themeMode
+        }
+    }
+
+    // Busy overlay state
+    @Published public var isBusy: Bool = false
+    @Published public var busyTitle: String = ""
+    @Published public var busyMessage: String = ""
+    @Published public var busyProgress: Double? = nil
+    public var cancelBusyAction: (() -> Void)? = nil
+
+    // Cell Inspector
+    @Published public var inspectingCell: CellInspectInfo? = nil
+
+    // Selection state
+    @Published public var selectedCell: (row: Int, col: Int)? = nil
+    @Published public var selectedRowIndex: Int? = nil
+
     public let session = SessionManager.shared
     public let recents = RecentsManager.shared
+    public let persistence = StatePersistenceManager.shared
 
     public init() {
+        self.themeMode = persistence.themeMode
+        self.zoomScale = persistence.zoomScale
         refreshSession()
+    }
+
+    public var effectiveColorScheme: ColorScheme? {
+        switch themeMode {
+        case .light:
+            return .light
+        case .dark:
+            return .dark
+        case .system:
+            if let docTheme = activeDocEntry?.doc.style.theme.lowercased() {
+                if docTheme == "light" { return .light }
+                if docTheme == "dark" { return .dark }
+            }
+            return nil
+        }
     }
 
     public func refreshSession() {
@@ -55,12 +111,48 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
+    public func pasteFromClipboard() {
+        let pb = NSPasteboard.general
+
+        // 1. Try file URLs from pasteboard
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], let firstURL = urls.first {
+            open(url: firstURL)
+            return
+        }
+
+        // 2. Try string content
+        if let string = pb.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), !string.isEmpty {
+            var path = string
+            // Handle file:// URIs
+            if path.hasPrefix("file://"), let url = URL(string: path) {
+                path = url.path
+            }
+            // Strip wrapping quotes
+            if (path.hasPrefix("\"") && path.hasSuffix("\"")) || (path.hasPrefix("'") && path.hasSuffix("'")) {
+                path = String(path.dropFirst().dropLast())
+            }
+            let expanded = (path as NSString).expandingTildeInPath
+            if FileManager.default.fileExists(atPath: expanded) {
+                open(path: expanded)
+                return
+            } else {
+                errorMessage = "Cannot open pasted path: File not found at '\(path)'"
+                return
+            }
+        }
+
+        errorMessage = "Clipboard does not contain a valid database file path."
+    }
+
     public func setActiveDocument(_ entry: DocEntry) {
         self.activeDocEntry = entry
         let visibleTables = entry.doc.tables.filter { !$0.hidden }
         let defaultTable = visibleTables.first?.name ?? entry.doc.tables.first?.name ?? ""
         self.selectedTableName = defaultTable
         self.isGalleryView = false
+        self.selectedCell = nil
+        self.selectedRowIndex = nil
+        self.inspectingCell = nil
     }
 
     public func selectDoc(id: String) {
@@ -119,15 +211,38 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
+    public func setThemeMode(_ mode: AppThemeMode) {
+        themeMode = mode
+    }
+
+    public func setBusy(title: String, message: String, progress: Double? = nil, cancellable: (() -> Void)? = nil) {
+        self.isBusy = true
+        self.busyTitle = title
+        self.busyMessage = message
+        self.busyProgress = progress
+        self.cancelBusyAction = cancellable
+    }
+
+    public func clearBusy() {
+        self.isBusy = false
+        self.busyTitle = ""
+        self.busyMessage = ""
+        self.busyProgress = nil
+        self.cancelBusyAction = nil
+    }
+
     public func zoomIn() {
-        zoomScale = min(2.0, zoomScale + 0.1)
+        zoomScale = min(BehaviorConfig.zoomMax, zoomScale + 0.1)
+        persistence.zoomScale = zoomScale
     }
 
     public func zoomOut() {
-        zoomScale = max(0.7, zoomScale - 0.1)
+        zoomScale = max(BehaviorConfig.zoomMin, zoomScale - 0.1)
+        persistence.zoomScale = zoomScale
     }
 
     public func zoomReset() {
-        zoomScale = 1.0
+        zoomScale = BehaviorConfig.zoomDefault
+        persistence.zoomScale = zoomScale
     }
 }

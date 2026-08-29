@@ -5,12 +5,16 @@ public struct Table: Identifiable, Equatable, Hashable, Codable, Sendable {
     public var id: String { name }
     public let name: String
     public var label: String
-    public let type: String // "table" or "view"
+    public let type: String // "table", "view", or "virtual"
     public var hidden: Bool
     public let hasRowID: Bool
 
     public var isView: Bool {
         return type.lowercased() == "view"
+    }
+
+    public var isVirtual: Bool {
+        return type.lowercased() == "virtual" || type.lowercased().contains("fts")
     }
 
     public init(name: String, label: String? = nil, type: String = "table", hidden: Bool = false, hasRowID: Bool = true) {

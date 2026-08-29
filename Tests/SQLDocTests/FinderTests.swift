@@ -1,8 +1,10 @@
-import XCTest
+import Testing
 import Foundation
 @testable import SQLDocCore
 
-final class FinderTests: XCTestCase {
+@Suite("FinderTests")
+struct FinderTests {
+    @Test("Test Streaming Find and wildcard search")
     func testStreamingFind() throws {
         let tempDir = NSTemporaryDirectory()
         let tempDBPath = (tempDir as NSString).appendingPathComponent("finder_test_\(UUID().uuidString).db")
@@ -21,13 +23,13 @@ final class FinderTests: XCTestCase {
 
         // Find "INFO"
         let res1 = try doc.find(table: "logs", query: "INFO")
-        XCTAssertEqual(res1.matches.count, 2)
-        XCTAssertEqual(res1.matches[0].rowID, 1)
-        XCTAssertEqual(res1.matches[1].rowID, 4)
+        #expect(res1.matches.count == 2)
+        #expect(res1.matches[0].rowID == 1)
+        #expect(res1.matches[1].rowID == 4)
 
         // Find wildcard text "95%"
         let res2 = try doc.find(table: "logs", query: "95%")
-        XCTAssertEqual(res2.matches.count, 1)
-        XCTAssertEqual(res2.matches[0].rowID, 2)
+        #expect(res2.matches.count == 1)
+        #expect(res2.matches[0].rowID == 2)
     }
 }

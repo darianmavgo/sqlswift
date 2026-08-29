@@ -1,8 +1,10 @@
-import XCTest
+import Testing
 import Foundation
 @testable import SQLDocCore
 
-final class CounterTests: XCTestCase {
+@Suite("CounterTests")
+struct CounterTests {
+    @Test("Test O(1) estimate and background exact count")
     func testO1EstimateAndBackgroundExactCount() async throws {
         let tempDir = NSTemporaryDirectory()
         let tempDBPath = (tempDir as NSString).appendingPathComponent("counter_test_\(UUID().uuidString).db")
@@ -23,8 +25,8 @@ final class CounterTests: XCTestCase {
 
         // O(1) estimate is instant
         let est = doc.estimateRows(for: "items")
-        XCTAssertTrue(est.known)
-        XCTAssertEqual(est.rows, 500)
+        #expect(est.known)
+        #expect(est.rows == 500)
 
         // Count triggers background exact count
         _ = doc.count(for: "items")
@@ -34,12 +36,12 @@ final class CounterTests: XCTestCase {
         for _ in 0..<100 {
             let current = doc.count(for: "items")
             if current.exact {
-                XCTAssertEqual(current.rows, 500)
+                #expect(current.rows == 500)
                 settled = true
                 break
             }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
-        XCTAssertTrue(settled)
+        #expect(settled)
     }
 }

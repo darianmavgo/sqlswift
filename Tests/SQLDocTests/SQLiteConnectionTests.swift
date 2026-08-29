@@ -1,8 +1,10 @@
-import XCTest
+import Testing
 import Foundation
 @testable import SQLDocCore
 
-final class SQLiteConnectionTests: XCTestCase {
+@Suite("SQLiteConnectionTests")
+struct SQLiteConnectionTests {
+    @Test("Test Read-Only connection and pragmas")
     func testReadOnlyConnectionAndPragmas() throws {
         let tempDir = NSTemporaryDirectory()
         let tempDBPath = (tempDir as NSString).appendingPathComponent("test_\(UUID().uuidString).db")
@@ -19,12 +21,12 @@ final class SQLiteConnectionTests: XCTestCase {
         defer { readConn.close() }
 
         let rows = try readConn.query("SELECT id, name, age, bio FROM users ORDER BY id")
-        XCTAssertEqual(rows.count, 2)
-        XCTAssertEqual(rows[0][1], .text("Alice"))
-        XCTAssertEqual(rows[0][2], .integer(30))
-        XCTAssertEqual(rows[0][3], .blob(bytes: 4))
-        XCTAssertEqual(rows[1][1], .text("Bob"))
-        XCTAssertEqual(rows[1][2], .integer(25))
-        XCTAssertEqual(rows[1][3], .null)
+        #expect(rows.count == 2)
+        #expect(rows[0][1] == .text("Alice"))
+        #expect(rows[0][2] == .integer(30))
+        #expect(rows[0][3] == .blob(bytes: 4))
+        #expect(rows[1][1] == .text("Bob"))
+        #expect(rows[1][2] == .integer(25))
+        #expect(rows[1][3] == .null)
     }
 }

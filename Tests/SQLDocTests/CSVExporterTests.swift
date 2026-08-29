@@ -1,8 +1,10 @@
-import XCTest
+import Testing
 import Foundation
 @testable import SQLDocCore
 
-final class CSVExporterTests: XCTestCase {
+@Suite("CSVExporterTests")
+struct CSVExporterTests {
+    @Test("Test CSV Export of records")
     func testCSVExport() throws {
         let tempDir = NSTemporaryDirectory()
         let tempDBPath = (tempDir as NSString).appendingPathComponent("csv_test_\(UUID().uuidString).db")
@@ -20,9 +22,9 @@ final class CSVExporterTests: XCTestCase {
         let csv = try doc.exportCSV(for: "products")
         let lines = csv.split(separator: "\n").map(String.init)
 
-        XCTAssertEqual(lines.count, 3)
-        XCTAssertEqual(lines[0], "id,name,price")
-        XCTAssertEqual(lines[1], "1,\"Widget, Pro\",29.99")
-        XCTAssertEqual(lines[2], "2,\"Gadget \"\"Special\"\"\",49.5")
+        #expect(lines.count == 3)
+        #expect(lines[0] == "id,name,price")
+        #expect(lines[1] == "1,\"Widget, Pro\",29.99")
+        #expect(lines[2] == "2,\"Gadget \"\"Special\"\"\",49.5")
     }
 }

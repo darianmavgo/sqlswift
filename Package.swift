@@ -22,6 +22,10 @@ let package = Package(
         .executable(
             name: "ConfigGen",
             targets: ["ConfigGen"]
+        ),
+        .executable(
+            name: "SQLDocTestsRunner",
+            targets: ["SQLDocTestsRunner"]
         )
     ],
     dependencies: [],
@@ -42,18 +46,16 @@ let package = Package(
             path: "Sources/SQLDocApp"
         ),
         // Build-time only: reads sqldoc.db, writes Sources/SQLDocCore/Generated/.
-        // Depends on nothing in this package, so `swift run ConfigGen` never
-        // needs the files it generates to already exist.
         .executableTarget(
             name: "ConfigGen",
             dependencies: [],
             path: "Sources/ConfigGen",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
-        .testTarget(
-            name: "SQLDocTests",
+        .executableTarget(
+            name: "SQLDocTestsRunner",
             dependencies: ["SQLDocCore"],
-            path: "Tests/SQLDocTests"
+            path: "Tests/SQLDocTestsRunner"
         )
     ]
 )

@@ -3,21 +3,20 @@ import SQLDocCore
 import UniformTypeIdentifiers
 
 public struct MainView: View {
-    @StateObject public var appVM = AppViewModel()
+    @ObservedObject public var appVM: AppViewModel
     @State private var tableVMs: [String: TableViewModel] = [:]
+
+    public init(appVM: AppViewModel = AppViewModel()) {
+        self._appVM = ObservedObject(wrappedValue: appVM)
+    }
 
     public var body: some View {
         VStack(spacing: 0) {
             // Top Navigation Bar
             topBarView
 
-            // Find Bar
-            if appVM.isFindBarVisible, let activeTableVM = currentTableVM {
-                FindBarView(tableVM: activeTableVM)
-            }
-
-            // Main Content Area
-            ZStack {
+            // Main Content Area (Grid / Gallery / Start with Floating Find Bar)
+            ZStack(alignment: .topTrailing) {
                 if appVM.activeDocEntry != nil {
                     if appVM.isGalleryView {
                         GalleryView(appVM: appVM)
@@ -28,6 +27,23 @@ public struct MainView: View {
                     }
                 } else {
                     StartPageView(appVM: appVM)
+                }
+
+                // Floating Find Bar Overlay matching sqldoc
+                if appVM.isFindBarVisible, let activeTableVM = currentTableVM {
+                    FindBarView(tableVM: activeTableVM) {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            appVM.isFindBarVisible = false
+                            activeTableVM.cancelFind()
+                        }
+                    }
+                    .padding(.top, 8)
+                    .padding(.trailing, 14)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .move(edge: .top)),
+                        removal: .opacity
+                    ))
+                    .zIndex(30)
                 }
 
                 // Drop Overlay
@@ -48,6 +64,17 @@ public struct MainView: View {
                     }
                     .transition(.opacity)
                 }
+
+                // Busy Progress Overlay
+                if appVM.isBusy {
+                    BusyOverlayView(
+                        title: appVM.busyTitle,
+                        message: appVM.busyMessage,
+                        progress: appVM.busyProgress,
+                        onCancel: appVM.cancelBusyAction
+                    )
+                    .transition(.opacity)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -57,6 +84,14 @@ public struct MainView: View {
             }
         }
         .accentColor(appVM.activeDocEntry != nil ? AppTheme.color(from: appVM.activeDocEntry!.doc.style.accent) : Color.accentColor)
+        .preferredColorScheme(appVM.effectiveColorScheme)
+        .sheet(item: $appVM.inspectingCell) { info in
+            DataInspectorView(info: info) {
+                appVM.inspectingCell = nil
+            }
+            .padding()
+            .frame(minWidth: 540, minHeight: 400)
+        }
         .onDrop(of: [.fileURL, .data], isTargeted: $appVM.isDropTargeted) { providers in
             handleDrop(providers: providers)
         }
@@ -76,7 +111,7 @@ public struct MainView: View {
         if let existing = tableVMs[key] {
             return existing
         }
-        let vm = TableViewModel(doc: entry.doc, tableName: appVM.selectedTableName)
+        let vm = TableViewModel(doc: entry.doc, tableName: appVM.selectedTableName, docID: entry.id)
         tableVMs[key] = vm
         return vm
     }
@@ -150,7 +185,9 @@ public struct MainView: View {
 
                 // Find Button
                 Button(action: {
-                    appVM.isFindBarVisible.toggle()
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        appVM.isFindBarVisible.toggle()
+                    }
                 }) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 13, weight: .medium))
@@ -174,6 +211,24 @@ public struct MainView: View {
                 .buttonStyle(.plain)
                 .help("Zoom in (⌘+)")
 
+                // Theme Menu
+                Menu {
+                    Button("System Appearance") {
+                        appVM.setThemeMode(.system)
+                    }
+                    Button("Light Mode") {
+                        appVM.setThemeMode(.light)
+                    }
+                    Button("Dark Mode") {
+                        appVM.setThemeMode(.dark)
+                    }
+                } label: {
+                    Image(systemName: appVM.themeMode == .dark ? "moon.fill" : (appVM.themeMode == .light ? "sun.max.fill" : "circle.lefthalf.filled"))
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .menuStyle(.borderlessButton)
+                .help("Change Theme")
+
                 // CSV Export Button
                 Button(action: { appVM.exportCurrentTable() }) {
                     Image(systemName: "arrow.down.to.line")
@@ -183,6 +238,24 @@ public struct MainView: View {
                 .help("Export this table as CSV (⌘E)")
             } else {
                 Spacer()
+
+                // Theme Menu on start page
+                Menu {
+                    Button("System Appearance") {
+                        appVM.setThemeMode(.system)
+                    }
+                    Button("Light Mode") {
+                        appVM.setThemeMode(.light)
+                    }
+                    Button("Dark Mode") {
+                        appVM.setThemeMode(.dark)
+                    }
+                } label: {
+                    Image(systemName: appVM.themeMode == .dark ? "moon.fill" : (appVM.themeMode == .light ? "sun.max.fill" : "circle.lefthalf.filled"))
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .menuStyle(.borderlessButton)
+                .help("Change Theme")
             }
         }
         .padding(.horizontal, 12)
