@@ -3,65 +3,62 @@ BUILD_DIR = .build/release
 INSTALL_DIR ?= $(HOME)/.local/bin
 APPS_DIR ?= /Applications
 
-.PHONY: all build release test clean install app bench config config-check icons
+.PHONY: all build release test clean install app bench config generate icons config-check
+
+CONFIG_DB     = sqldoc.db
+CONFIG_SRC    = config/schema.sql config/seed.sql
+GENERATED_DIR = Sources/SQLDocCore/Generated
+GENERATED_STAMP = .build/configgen.stamp
 
 all: build
 
 # Rebuild the authoritative build-time config database from its SQL source.
-config:
-	@rm -f sqldoc.db
-	@sqlite3 sqldoc.db < config/schema.sql
-	@sqlite3 sqldoc.db < config/seed.sql
-	@echo "Built sqldoc.db from config/*.sql"
+$(CONFIG_DB): $(CONFIG_SRC)
+	@rm -f $(CONFIG_DB)
+	@sqlite3 $(CONFIG_DB) < config/schema.sql
+	@sqlite3 $(CONFIG_DB) < config/seed.sql
+	@echo "Built $(CONFIG_DB) from config/*.sql"
+
+config: $(CONFIG_DB)
+
+# Read sqldoc.db and emit typed Swift into Sources/SQLDocCore/Generated/.
+# This is the step that pulls the config database into the build: everything
+# under $(GENERATED_DIR) is compiled as part of SQLDocCore.
+$(GENERATED_STAMP): $(CONFIG_DB) Sources/ConfigGen/main.swift
+	@mkdir -p .build
+	swift run ConfigGen --db $(CONFIG_DB) --out $(GENERATED_DIR) --platform mac --plist .build/Info.plist
+	@touch $(GENERATED_STAMP)
+
+generate: $(GENERATED_STAMP)
 
 # Render every platform icon from config/assets/icon.svg (see icon_target in sqldoc.db).
-icons: config
-	@sh scripts/gen-icons.sh --db sqldoc.db
+icons: $(CONFIG_DB)
+	@sh scripts/gen-icons.sh --db $(CONFIG_DB)
 
-# CI guard: regenerate everything and fail if anything is stale.
-# (wire in `swift run ConfigGen` once the generator lands — see docs/build-config.md)
-config-check: config
-	@git diff --exit-code -- sqldoc.db config/ || \
-		(echo "sqldoc.db is stale — run 'make config' and commit"; exit 1)
+# CI guard: regenerate from the database and fail if any output is stale.
+config-check: generate
+	@git diff --exit-code -- $(CONFIG_DB) config/ '$(GENERATED_DIR)/*.swift' || \
+		(echo "config output is stale — run 'make generate' and commit"; exit 1)
 
-build:
+build: generate
 	swift build
 
-release:
+release: generate
 	swift build -c release
 
-test:
+test: generate
 	swift test
 
+# The bundle's Info.plist and icon both come from sqldoc.db:
+#   .build/Info.plist        rendered by ConfigGen (make generate)
+#   config/assets/AppIcon.icns  rendered by scripts/gen-icons.sh (make icons)
 app: release
-	@mkdir -p bin
-	@rm -rf bin/$(APP_NAME).app
-	@mkdir -p bin/$(APP_NAME).app/Contents/MacOS
-	@mkdir -p bin/$(APP_NAME).app/Contents/Resources
+	@mkdir -p bin/$(APP_NAME).app/Contents/MacOS bin/$(APP_NAME).app/Contents/Resources
 	@cp $(BUILD_DIR)/SQLDocApp bin/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)
 	@cp $(BUILD_DIR)/sqldoc bin/sqldoc
-	@echo '<?xml version="1.0" encoding="UTF-8"?>' > bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '<plist version="1.0">' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '<dict>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '    <key>CFBundleExecutable</key><string>$(APP_NAME)</string>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '    <key>CFBundleIdentifier</key><string>com.darian.sqldoc</string>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '    <key>CFBundleName</key><string>$(APP_NAME)</string>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '    <key>CFBundlePackageType</key><string>APPL</string>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '    <key>CFBundleShortVersionString</key><string>0.3.0</string>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '    <key>LSMinimumSystemVersion</key><string>14.0</string>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '    <key>CFBundleDocumentTypes</key>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '    <array>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '        <dict>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '            <key>CFBundleTypeName</key><string>SQLite Database</string>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '            <key>CFBundleTypeRole</key><string>Viewer</string>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '            <key>LSHandlerRank</key><string>Alternate</string>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '            <key>CFBundleTypeExtensions</key>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '            <array><string>db</string><string>sqlite</string><string>sqlite3</string><string>db3</string></array>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '        </dict>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '    </array>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '</dict>' >> bin/$(APP_NAME).app/Contents/Info.plist
-	@echo '</plist>' >> bin/$(APP_NAME).app/Contents/Info.plist
+	@cp .build/Info.plist bin/$(APP_NAME).app/Contents/Info.plist
+	@printf 'APPL????' > bin/$(APP_NAME).app/Contents/PkgInfo
+	@[ -f config/assets/AppIcon.icns ] && cp config/assets/AppIcon.icns bin/$(APP_NAME).app/Contents/Resources/AppIcon.icns || echo "note: no AppIcon.icns (install rsvg-convert/resvg, then 'make icons')"
 	@echo "Built bin/$(APP_NAME).app and bin/sqldoc"
 
 install: app

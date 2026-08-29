@@ -21,6 +21,91 @@
 
   ],
   "swiftCommands" : {
+    "C.ConfigGen-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "fileList" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ConfigGen.build/sources",
+      "importPath" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/ConfigGen/main.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ConfigGen.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "ConfigGen",
+      "moduleOutputPath" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/Modules/ConfigGen.swiftmodule",
+      "objects" : [
+        "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ConfigGen.build/main.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "ConfigGen_main",
+        "-swift-version",
+        "5",
+        "-I",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-L",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-plugin-path",
+        "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "sqlswift"
+      ],
+      "outputFileMapPath" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ConfigGen.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ConfigGen.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/Modules/ConfigGen.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/darianhickman/Documents/sqlswift/Sources/ConfigGen/main.swift"
+      ],
+      "tempsPath" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ConfigGen.build",
+      "wholeModuleOptimization" : false
+    },
     "C.SQLDocApp-arm64-apple-macosx-debug.module" : {
       "executable" : "/Library/Developer/CommandLineTools/usr/bin/swiftc",
       "fileList" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocApp.build/sources",
@@ -334,6 +419,34 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/AppIdentity.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/BehaviorConfig.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/ConnectPragmas.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/DesignTokens.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/DocConventions.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/Keybindings.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/TypeRoles.swift"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/Column.swift"
         },
         {
@@ -400,6 +513,13 @@
         "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Doc.swift.o",
         "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Finder.swift.o",
         "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/RowReader.swift.o",
+        "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/AppIdentity.swift.o",
+        "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/BehaviorConfig.swift.o",
+        "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/ConnectPragmas.swift.o",
+        "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/DesignTokens.swift.o",
+        "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/DocConventions.swift.o",
+        "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Keybindings.swift.o",
+        "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/TypeRoles.swift.o",
         "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Column.swift.o",
         "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/ColumnHint.swift.o",
         "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/FindResult.swift.o",
@@ -488,6 +608,34 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/AppIdentity.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/BehaviorConfig.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/ConnectPragmas.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/DesignTokens.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/DocConventions.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Keybindings.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/TypeRoles.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Column.swift.o"
         },
         {
@@ -548,6 +696,13 @@
         "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Engine/Doc.swift",
         "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Engine/Finder.swift",
         "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Engine/RowReader.swift",
+        "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/AppIdentity.swift",
+        "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/BehaviorConfig.swift",
+        "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/ConnectPragmas.swift",
+        "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/DesignTokens.swift",
+        "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/DocConventions.swift",
+        "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/Keybindings.swift",
+        "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/TypeRoles.swift",
         "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/Column.swift",
         "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/ColumnHint.swift",
         "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/FindResult.swift",
@@ -796,6 +951,60 @@
 
   },
   "swiftTargetScanArgs" : {
+    "ConfigGen" : [
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "-module-name",
+      "ConfigGen",
+      "-package-name",
+      "sqlswift",
+      "-c",
+      "/Users/darianhickman/Documents/sqlswift/Sources/ConfigGen/main.swift",
+      "-I",
+      "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "ConfigGen_main",
+      "-swift-version",
+      "5",
+      "-I",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-L",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-plugin-path",
+      "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "sqlswift",
+      "-driver-use-frontend-path",
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc"
+    ],
     "SQLDocApp" : [
       "/Library/Developer/CommandLineTools/usr/bin/swiftc",
       "-module-name",
@@ -928,6 +1137,13 @@
       "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Engine/Doc.swift",
       "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Engine/Finder.swift",
       "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Engine/RowReader.swift",
+      "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/AppIdentity.swift",
+      "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/BehaviorConfig.swift",
+      "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/ConnectPragmas.swift",
+      "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/DesignTokens.swift",
+      "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/DocConventions.swift",
+      "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/Keybindings.swift",
+      "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/TypeRoles.swift",
       "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/Column.swift",
       "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/ColumnHint.swift",
       "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Models/FindResult.swift",
@@ -1100,6 +1316,9 @@
     ]
   },
   "targetDependencyMap" : {
+    "ConfigGen" : [
+
+    ],
     "SQLDocApp" : [
       "SQLDocCore"
     ],
@@ -1139,6 +1358,48 @@
     }
   },
   "writeCommands" : {
+    "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ConfigGen-entitlement.plist" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<entitlement-plist>"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<com.apple.security.get-task-allow>"
+        }
+      ],
+      "outputFilePath" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ConfigGen-entitlement.plist"
+    },
+    "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ConfigGen.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/ConfigGen/main.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ConfigGen.build/sources"
+    },
+    "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ConfigGen.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ConfigGen.build/main.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/ConfigGen.product/Objects.LinkFileList"
+    },
     "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocApp-entitlement.plist" : {
       "alwaysOutOfDate" : false,
       "inputs" : [
@@ -1260,6 +1521,14 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/AppIdentity.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/BehaviorConfig.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/BenchmarkRunner.swift.o"
         },
         {
@@ -1280,11 +1549,23 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/ConnectPragmas.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Counter.swift.o"
         },
         {
           "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/DesignTokens.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Doc.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/DocConventions.swift.o"
         },
         {
           "kind" : "file",
@@ -1293,6 +1574,10 @@
         {
           "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Finder.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Keybindings.swift.o"
         },
         {
           "kind" : "file",
@@ -1333,6 +1618,10 @@
         {
           "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/TableCount.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/TypeRoles.swift.o"
         }
       ],
       "outputFilePath" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocApp.product/Objects.LinkFileList"
@@ -1385,6 +1674,34 @@
         {
           "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Engine/RowReader.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/AppIdentity.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/BehaviorConfig.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/ConnectPragmas.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/DesignTokens.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/DocConventions.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/Keybindings.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/Sources/SQLDocCore/Generated/TypeRoles.swift"
         },
         {
           "kind" : "file",
@@ -1498,6 +1815,14 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/AppIdentity.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/BehaviorConfig.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/BenchmarkRunner.swift.o"
         },
         {
@@ -1518,11 +1843,23 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/ConnectPragmas.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Counter.swift.o"
         },
         {
           "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/DesignTokens.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Doc.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/DocConventions.swift.o"
         },
         {
           "kind" : "file",
@@ -1531,6 +1868,10 @@
         {
           "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Finder.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Keybindings.swift.o"
         },
         {
           "kind" : "file",
@@ -1571,6 +1912,10 @@
         {
           "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/TableCount.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/TypeRoles.swift.o"
         }
       ],
       "outputFilePath" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/sqldoc.product/Objects.LinkFileList"
@@ -1598,6 +1943,14 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/AppIdentity.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/BehaviorConfig.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/BenchmarkRunner.swift.o"
         },
         {
@@ -1618,11 +1971,23 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/ConnectPragmas.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Counter.swift.o"
         },
         {
           "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/DesignTokens.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Doc.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/DocConventions.swift.o"
         },
         {
           "kind" : "file",
@@ -1631,6 +1996,10 @@
         {
           "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Finder.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Keybindings.swift.o"
         },
         {
           "kind" : "file",
@@ -1671,6 +2040,10 @@
         {
           "kind" : "file",
           "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/TableCount.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/TypeRoles.swift.o"
         },
         {
           "kind" : "file",

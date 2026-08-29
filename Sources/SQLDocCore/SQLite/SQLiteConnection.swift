@@ -64,14 +64,10 @@ public final class SQLiteConnection: @unchecked Sendable {
     }
 
     private func applyPragmas() throws {
-        var pragmas = [
-            "PRAGMA cache_size = -65536",    // 64MB cache
-            "PRAGMA mmap_size = 268435456",  // 256MB mmap
-            "PRAGMA temp_store = 2",         // Memory
-            "PRAGMA busy_timeout = 5000"
-        ]
-        if isReadOnly {
-            pragmas.insert("PRAGMA query_only = 1", at: 0)
+        // Generated from the connect_pragma table in sqldoc.db (see ConnectPragmas.swift).
+        var pragmas = sqldocConnectPragmas
+        if !isReadOnly {
+            pragmas.removeAll { $0.contains("query_only") }
         }
         for p in pragmas {
             _ = try? exec(p)

@@ -35,7 +35,7 @@ INSERT INTO token(name,category,value_light,value_dark,unit,platform,overridable
   ('rule-strong',    'color','#c8cbcf','#4a4d52',  '', 'all', 0, 'Emphasised borders (header underline, panels)',  25),
   ('head',           'color','#f5f6f7','#292a2d',  '', 'all', 0, 'Column header + gutter + status bar fill',        26),
   ('skeleton',       'color','#eceef0','#2a2c2f',  '', 'all', 0, 'Loading placeholder bars',                       27),
-  ('accent',         'color','#2563eb', NULL,      '', 'all', 1, 'Primary accent; a document _style may override', 30),
+  ('accent',         'color','#2563eb', NULL,      '', 'all', 1, 'Primary accent colour', 30),
   ('mark-bg',        'color','#ffd54f', NULL,      '', 'all', 0, 'Find-match highlight background',                 31),
   ('mark-fg',        'color','#202124', NULL,      '', 'all', 0, 'Find-match highlight text',                       32),
   ('status-ok',      'color','#1e8e3e', NULL,      '', 'all', 0, 'Fast query timing badge',                        33),
@@ -248,8 +248,7 @@ INSERT INTO identity(key,platform,value,description) VALUES
 
 -- DERIVED ICON FILES  (rendered by scripts/gen-icons.sh)
 INSERT INTO icon_target(path,repo,format,sizes,platform,consumer,description) VALUES
-  ('config/assets/AppIcon.icns',              'sqlswift','icns','16,32,64,128,256,512,1024','mac','CFBundleIconFile','SwiftUI app icon; copied into bin/sqldoc.app/Contents/Resources at package time'),
-  ('Sources/SQLDocApp/Resources/AppIcon.icns','sqlswift','icns','16,32,64,128,256,512,1024','mac','CFBundleIconFile','Same file, staged as a SwiftPM resource'),
+  ('config/assets/AppIcon.icns',              'sqlswift','icns','16,32,64,128,256,512,1024','mac','CFBundleIconFile','SwiftUI app icon; `make app` copies it into bin/sqldoc.app/Contents/Resources'),
   ('packaging/macos/sqldoc.icns',             'sqldoc','icns','16,32,64,128,256,512,1024','web','CFBundleIconFile','Go bundle + nested viewer icon'),
   ('internal/ui/assets/icon.svg',             'sqldoc','svg','','web','favicon','Modern vector favicon, served at /icon.svg'),
   ('internal/ui/assets/favicon.ico',          'sqldoc','ico','16,32,48','web','favicon','Legacy favicon, served at /favicon.ico'),

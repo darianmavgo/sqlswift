@@ -1,7 +1,8 @@
 import Foundation
 import SQLDocCore
 
-let version = "0.3.0"
+// Generated from the identity table in sqldoc.db (see AppIdentity.swift).
+let version = AppIdentity.version
 
 let usage = """
 sqldoc — open a SQLite database as a document (Pure Swift & SwiftUI)

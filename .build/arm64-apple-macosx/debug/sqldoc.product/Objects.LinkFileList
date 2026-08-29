@@ -1,13 +1,19 @@
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCLI.build/main.swift.o
+/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/AppIdentity.swift.o
+/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/BehaviorConfig.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/BenchmarkRunner.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/CSVExporter.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Column.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/ColumnHint.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/ColumnSampler.swift.o
+/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/ConnectPragmas.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Counter.swift.o
+/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/DesignTokens.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Doc.swift.o
+/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/DocConventions.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/FindResult.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Finder.swift.o
+/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Keybindings.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Page.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/RecentsManager.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/RowReader.swift.o
@@ -18,3 +24,4 @@
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Style.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/Table.swift.o
 /Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/TableCount.swift.o
+/Users/darianhickman/Documents/sqlswift/.build/arm64-apple-macosx/debug/SQLDocCore.build/TypeRoles.swift.o

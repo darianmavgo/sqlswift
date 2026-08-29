@@ -190,7 +190,7 @@ CREATE VIEW v_identity AS
   WHERE p.id <> 'all' AND COALESCE(spec.value, base.value) IS NOT NULL;
 
 CREATE VIEW v_token_resolved AS
-  SELECT t.name, t.category, t.unit, t.overridable, t.description,
+  SELECT t.name, t.category, t.unit, t.overridable, t.description, t.sort_order,
          p.id AS platform,
          COALESCE(o.value, t.value_light) AS value_light,
          CASE WHEN t.category = 'color'
