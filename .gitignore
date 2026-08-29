@@ -1,1 +1,50 @@
-/bin
+# Xcode & Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+Package.pins
+
+# Build & Release outputs
+/bin/
+*.app
+*.dSYM/
+*.ipa
+*.pkg
+
+# Xcode User Data & State
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+DerivedData/
+*.xcscmblueprint
+
+# Tests & Coverage
+*.xctest
+*.xcresult
+*.gcov
+*.coverage
+*.profdata
+
+# macOS System & Metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# Editor & IDE artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary & Local test databases
+testdata/*.db
+testdata/*.db-wal
+testdata/*.db-shm
+*.db-journal
+/tmp/
