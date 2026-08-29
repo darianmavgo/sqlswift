@@ -3,9 +3,26 @@ BUILD_DIR = .build/release
 INSTALL_DIR ?= $(HOME)/.local/bin
 APPS_DIR ?= /Applications
 
-.PHONY: all build release test clean install app bench
+.PHONY: all build release test clean install app bench config config-check icons
 
 all: build
+
+# Rebuild the authoritative build-time config database from its SQL source.
+config:
+	@rm -f sqldoc.db
+	@sqlite3 sqldoc.db < config/schema.sql
+	@sqlite3 sqldoc.db < config/seed.sql
+	@echo "Built sqldoc.db from config/*.sql"
+
+# Render every platform icon from config/assets/icon.svg (see icon_target in sqldoc.db).
+icons: config
+	@sh scripts/gen-icons.sh --db sqldoc.db
+
+# CI guard: regenerate everything and fail if anything is stale.
+# (wire in `swift run ConfigGen` once the generator lands — see docs/build-config.md)
+config-check: config
+	@git diff --exit-code -- sqldoc.db config/ || \
+		(echo "sqldoc.db is stale — run 'make config' and commit"; exit 1)
 
 build:
 	swift build

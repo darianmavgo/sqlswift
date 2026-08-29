@@ -173,9 +173,9 @@ INSERT INTO keybinding(action,chord,context,label,platform) VALUES
   ('find-next',        'enter',        'find',  'Next match',                 'all'),
   ('find-prev',        'shift+enter',  'find',  'Previous match',             'all'),
   ('find-next-doc',    'mod+g',        'table', 'Next match (bar closed)',    'all'),
-  ('find-prev-doc',    'mod+shift+g',  'table', 'Previous match (bar closed)','web'),
+  ('find-prev-doc',    'mod+shift+g',  'table', 'Previous match (bar closed)','all'),
   ('find-close',       'escape',       'find',  'Close the find bar',         'all'),
-  ('gallery-toggle',   'mod+shift+g',  'global','Toggle the gallery view',    'all'),
+  ('gallery-toggle',   'mod+alt+g',    'global','Toggle the gallery view',    'all'),
   ('zoom-in',          'mod+plus',     'table', 'Zoom in',                    'all'),
   ('zoom-out',         'mod+minus',    'table', 'Zoom out',                   'all'),
   ('zoom-reset',       'mod+0',        'table', 'Actual size',                'all'),
@@ -214,5 +214,47 @@ INSERT INTO doc_convention(name,kind,canonical,detail,description) VALUES
   ('color_scheme','style-key-alias','theme','','Alias accepted for the theme key'),
   ('hidden-prefix','rule','_','Any table whose name begins with "_" is hidden from the viewer',''),
   ('humanize','rule','','snake_case -> Title Case; tokens that are already ALL-CAPS are kept as acronyms','How a table name becomes a display label when _nav gives none');
+
+-- ---------------------------------------------------------------------------
+-- APPLICATION IDENTITY
+-- 'all' rows are canonical; a platform row overrides for that platform only.
+INSERT INTO identity(key,platform,value,description) VALUES
+  ('name',                'all','sqldoc','Short name: macOS CFBundleName / menu bar, CLI binary, meta[application-name]'),
+  ('display_name',        'all','sqldoc','macOS CFBundleDisplayName / Finder / Dock'),
+  ('wordmark',            'all','sqldoc','Text shown as the start-page heading'),
+  ('tagline',             'all','A read-only viewer for SQLite.','One-liner: .desktop Comment, manifest description, about box'),
+  ('tagline.start',       'all','Drop a SQLite database anywhere on this page, or open one.','Longer line under the start-page wordmark'),
+  ('version',             'all','0.3.0','Marketing version: CFBundleShortVersionString, `--version`, start-page footer'),
+  ('build',               'all','1','CFBundleVersion / build metadata'),
+  ('bundle_id',           'all','com.mavgo.sqldoc','Primary macOS + UTI reverse-DNS prefix'),
+  ('bundle_id.viewer',    'all','com.mavgo.sqldoc.viewer','Nested native-window bundle (Go sqldoc-view)'),
+  ('category',            'all','public.app-category.developer-tools','macOS LSApplicationCategoryType'),
+  ('copyright',           'all','(c) 2026 Darian Hickman','NSHumanReadableCopyright'),
+  ('homepage',            'all','https://github.com/darianmavgo/sqldoc','About box, manifest, .desktop'),
+  ('cli_name',            'all','sqldoc','Installed CLI binary name'),
+  ('macos_min_version',   'web','11.0','LSMinimumSystemVersion for the Go bundle (AppKit only)'),
+  ('macos_min_version',   'mac','14.0','LSMinimumSystemVersion for the SwiftUI app; also the Package.swift platform floor'),
+  ('window_title_format', 'all','{document} — {app}','Window / browser-tab title; {document} = _style.title or filename'),
+  ('version_line_format', 'all','{app} {version} · {driver}','Start-page footer / `--version` detail line'),
+  ('doc_type_name',       'all','SQLite database','CFBundleTypeName / UTTypeDescription'),
+  ('doc_uti',             'all','com.mavgo.sqldoc.sqlite','Exported UTI for the document type'),
+  ('doc_extensions',      'all','db,sqlite,sqlite3,db3,s3db,sl3','File extensions the app claims'),
+  ('doc_handler_rank',    'web','Owner','LSHandlerRank for the Go bundle'),
+  ('doc_handler_rank',    'mac','Alternate','LSHandlerRank for the SwiftUI app (do not seize the type)'),
+  ('theme_color',         'all','#323639','Browser chrome colour (meta theme-color / manifest) — tracks the --toolbar token'),
+  ('background_color',    'all','#d6d9dc','PWA manifest background_color — tracks the --ground token'),
+  ('icon.master',         'all','config/assets/icon.svg','1024-square vector master; every icon_target renders from this'),
+  ('icon.document_master','all','config/assets/icon-document.svg','Master for the .db file-type icon (falls back to icon.master if absent)');
+
+-- DERIVED ICON FILES  (rendered by scripts/gen-icons.sh)
+INSERT INTO icon_target(path,repo,format,sizes,platform,consumer,description) VALUES
+  ('config/assets/AppIcon.icns',              'sqlswift','icns','16,32,64,128,256,512,1024','mac','CFBundleIconFile','SwiftUI app icon; copied into bin/sqldoc.app/Contents/Resources at package time'),
+  ('Sources/SQLDocApp/Resources/AppIcon.icns','sqlswift','icns','16,32,64,128,256,512,1024','mac','CFBundleIconFile','Same file, staged as a SwiftPM resource'),
+  ('packaging/macos/sqldoc.icns',             'sqldoc','icns','16,32,64,128,256,512,1024','web','CFBundleIconFile','Go bundle + nested viewer icon'),
+  ('internal/ui/assets/icon.svg',             'sqldoc','svg','','web','favicon','Modern vector favicon, served at /icon.svg'),
+  ('internal/ui/assets/favicon.ico',          'sqldoc','ico','16,32,48','web','favicon','Legacy favicon, served at /favicon.ico'),
+  ('internal/ui/assets/apple-touch-icon.png', 'sqldoc','png','180','web','apple-touch-icon','iOS / iPadOS home-screen icon'),
+  ('internal/ui/assets/icon-192.png',         'sqldoc','png','192','web','manifest','PWA manifest icon'),
+  ('internal/ui/assets/icon-512.png',         'sqldoc','png','512','web','manifest','PWA manifest icon (maskable)');
 
 COMMIT;

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- sqldoc master app icon. 1024 square. Every platform icon renders from
+       this file (see icon_target in sqldoc.db). Replace freely; keep it 1024². -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b74ff"/>
+      <stop offset="1" stop-color="#1c46c9"/>
+    </linearGradient>
+    <clipPath id="sheet">
+      <rect x="248" y="196" width="528" height="612" rx="40"/>
+    </clipPath>
+  </defs>
+
+  <!-- rounded-square ground -->
+  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
+
+  <!-- document sheet -->
+  <rect x="248" y="196" width="528" height="612" rx="40" fill="#ffffff"/>
+
+  <g clip-path="url(#sheet)">
+    <!-- zebra body rows -->
+    <rect x="248" y="398" width="528" height="102" fill="#f4f6f8"/>
+    <rect x="248" y="602" width="528" height="102" fill="#f4f6f8"/>
+
+    <!-- header band -->
+    <rect x="248" y="196" width="528" height="102" fill="#2f6bff"/>
+    <rect x="286" y="234" width="150" height="26" rx="13" fill="#ffffff" opacity="0.9"/>
+    <rect x="470" y="234" width="104" height="26" rx="13" fill="#ffffff" opacity="0.6"/>
+    <rect x="606" y="234" width="132" height="26" rx="13" fill="#ffffff" opacity="0.6"/>
+
+    <!-- selected cell -->
+    <rect x="424" y="500" width="176" height="102" fill="#2f6bff" opacity="0.92"/>
+
+    <!-- grid rules -->
+    <g stroke="#d3d7db" stroke-width="4">
+      <line x1="248" y1="398" x2="776" y2="398"/>
+      <line x1="248" y1="500" x2="776" y2="500"/>
+      <line x1="248" y1="602" x2="776" y2="602"/>
+      <line x1="248" y1="704" x2="776" y2="704"/>
+    </g>
+    <g stroke="#c3c8cd" stroke-width="4">
+      <line x1="424" y1="298" x2="424" y2="808"/>
+      <line x1="600" y1="298" x2="600" y2="808"/>
+    </g>
+    <line x1="248" y1="298" x2="776" y2="298" stroke="#1e51d6" stroke-width="4"/>
+  </g>
+</svg>

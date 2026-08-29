@@ -28,6 +28,8 @@ DROP TABLE IF EXISTS type_role;
 DROP TABLE IF EXISTS keybinding;
 DROP TABLE IF EXISTS connect_pragma;
 DROP TABLE IF EXISTS doc_convention;
+DROP TABLE IF EXISTS identity;
+DROP TABLE IF EXISTS icon_target;
 
 -- ---------------------------------------------------------------------------
 -- meta: schema version + provenance. Read by codegen to stamp generated files.
@@ -148,7 +150,45 @@ CREATE TABLE doc_convention (
 );
 
 -- ---------------------------------------------------------------------------
+-- identity: what the application is CALLED and how it identifies itself, on
+-- every surface — macOS bundle, browser tab + PWA manifest, CLI, .desktop
+-- entry, window titles, error dialogs. One row per (key, platform); a
+-- platform-specific row shadows the 'all' row for that platform.
+CREATE TABLE identity (
+  key         TEXT NOT NULL,
+  platform    TEXT NOT NULL DEFAULT 'all' REFERENCES platform(id),
+  value       TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (key, platform)
+);
+
+-- icon_target: every derived icon file, rendered from a single master asset by
+-- `make icons` (scripts/gen-icons.sh). The master itself is identity key
+-- 'icon.master'. `sizes` is a CSV of pixel sizes to bake in (empty = vector or
+-- format-native). `consumer` says who references the output.
+CREATE TABLE icon_target (
+  path        TEXT PRIMARY KEY,        -- output path, relative to the repo that consumes it
+  repo        TEXT NOT NULL,           -- 'sqlswift' | 'sqldoc'
+  format      TEXT NOT NULL CHECK (format IN ('icns','iconset','png','ico','svg')),
+  sizes       TEXT NOT NULL DEFAULT '',
+  platform    TEXT NOT NULL REFERENCES platform(id),
+  consumer    TEXT NOT NULL DEFAULT ''  -- CFBundleIconFile | favicon | apple-touch-icon | manifest | document-icon
+              ,
+  description TEXT NOT NULL DEFAULT ''
+);
+
+-- ---------------------------------------------------------------------------
 -- Convenience views for codegen / inspection.
+CREATE VIEW v_identity AS
+  SELECT p.id AS platform, i.key,
+         COALESCE(spec.value, base.value) AS value,
+         COALESCE(spec.description, base.description) AS description
+  FROM platform p
+  JOIN (SELECT DISTINCT key FROM identity) i
+  LEFT JOIN identity base ON base.key = i.key AND base.platform = 'all'
+  LEFT JOIN identity spec ON spec.key = i.key AND spec.platform = p.id
+  WHERE p.id <> 'all' AND COALESCE(spec.value, base.value) IS NOT NULL;
+
 CREATE VIEW v_token_resolved AS
   SELECT t.name, t.category, t.unit, t.overridable, t.description,
          p.id AS platform,
