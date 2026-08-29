@@ -243,17 +243,21 @@ INSERT INTO identity(key,platform,value,description) VALUES
   ('doc_handler_rank',    'mac','Alternate','LSHandlerRank for the SwiftUI app (do not seize the type)'),
   ('theme_color',         'all','#323639','Browser chrome colour (meta theme-color / manifest) — tracks the --toolbar token'),
   ('background_color',    'all','#d6d9dc','PWA manifest background_color — tracks the --ground token'),
-  ('icon.master',         'all','config/assets/icon.svg','1024-square vector master; every icon_target renders from this'),
-  ('icon.document_master','all','config/assets/icon-document.svg','Master for the .db file-type icon (falls back to icon.master if absent)');
+  -- The mark is the tangerine icon from the sqldoc (Go) repo — a photo, not
+  -- vector. AppIcon.icns is committed verbatim (copied from
+  -- sqldoc/packaging/macos/sqldoc.icns); icon-master.png is its 1024px face,
+  -- used to render the web raster set and as a fallback.
+  ('icon.appicns',        'all','config/assets/AppIcon.icns','Pre-rendered macOS icon, committed as-is; `make app` copies it into the bundle'),
+  ('icon.master',         'all','config/assets/icon-master.png','1024x1024 PNG master for every rendered (non-.icns) icon size');
 
--- DERIVED ICON FILES  (rendered by scripts/gen-icons.sh)
+-- DERIVED ICON FILES  (rendered by scripts/gen-icons.sh from icon.master).
+-- The two .icns files are NOT here: sqldoc/packaging/macos/sqldoc.icns is the
+-- upstream source, and config/assets/AppIcon.icns is a verbatim copy of it.
 INSERT INTO icon_target(path,repo,format,sizes,platform,consumer,description) VALUES
-  ('config/assets/AppIcon.icns',              'sqlswift','icns','16,32,64,128,256,512,1024','mac','CFBundleIconFile','SwiftUI app icon; `make app` copies it into bin/sqldoc.app/Contents/Resources'),
-  ('packaging/macos/sqldoc.icns',             'sqldoc','icns','16,32,64,128,256,512,1024','web','CFBundleIconFile','Go bundle + nested viewer icon'),
-  ('internal/ui/assets/icon.svg',             'sqldoc','svg','','web','favicon','Modern vector favicon, served at /icon.svg'),
   ('internal/ui/assets/favicon.ico',          'sqldoc','ico','16,32,48','web','favicon','Legacy favicon, served at /favicon.ico'),
   ('internal/ui/assets/apple-touch-icon.png', 'sqldoc','png','180','web','apple-touch-icon','iOS / iPadOS home-screen icon'),
   ('internal/ui/assets/icon-192.png',         'sqldoc','png','192','web','manifest','PWA manifest icon'),
-  ('internal/ui/assets/icon-512.png',         'sqldoc','png','512','web','manifest','PWA manifest icon (maskable)');
+  ('internal/ui/assets/icon-512.png',         'sqldoc','png','512','web','manifest','PWA manifest icon'),
+  ('internal/ui/assets/favicon-32.png',       'sqldoc','png','32','web','favicon','PNG favicon for modern browsers');
 
 COMMIT;

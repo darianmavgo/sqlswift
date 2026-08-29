@@ -27,7 +27,7 @@ At runtime a document may still override a small, explicitly-marked subset
 | `connect_pragma` | PRAGMAs applied to every read-only handle | `connectPragmas` (Go); `applyPragmas()` body (Swift) |
 | `doc_convention` | the `_style`/`_nav` contract + key aliases | the `switch` in `loadStyle()` on both ports |
 | `identity` | app name, version, bundle id, doc-type registration, window titles, theme-color | `Info.plist`, web `<head>` + manifest, CLI `--version`, `.desktop` |
-| `icon_target` | every derived icon file + sizes + consumer | `make icons` renders each from `config/assets/icon.svg` |
+| `icon_target` | every derived icon file + sizes + consumer | `make icons` scales the web set from `config/assets/icon-master.png` |
 
 Three views do the platform resolution for you:
 
@@ -48,84 +48,86 @@ config/seed.sql      every value, with description  (reviewable, diffable)
 sqldoc.db            generated: sqlite3 sqldoc.db < schema.sql < seed.sql
 ```
 
-```make
-# Makefile
-config:            ## rebuild sqldoc.db from config/*.sql
-	rm -f sqldoc.db
-	sqlite3 sqldoc.db < config/schema.sql
-	sqlite3 sqldoc.db < config/seed.sql
+Make targets (implemented):
 
-generate: config   ## regenerate all platform config from sqldoc.db
-	swift run ConfigGen            # Swift side (this repo)
-	# cd ../sqldoc && go generate ./...   # Go side
+| target | does |
+|---|---|
+| `make config` | rebuild `sqldoc.db` from `config/schema.sql` + `config/seed.sql` |
+| `make generate` | run `ConfigGen` → `Sources/SQLDocCore/Generated/*.swift` + `.build/Info.plist` |
+| `make icons` | run `scripts/gen-icons.sh` → web favicon/manifest set from `icon-master.png` (the .icns is committed) |
+| `make build` / `release` / `test` | depend on `generate` — **this is how `sqldoc.db` enters the build** |
+| `make app` | copies the generated `Info.plist` + `AppIcon.icns` into `bin/sqldoc.app` |
+| `make config-check` | `make generate` then `git diff --exit-code` on db + config + generated |
 
-config-check: generate  ## CI: fail if generated files are stale
-	git diff --exit-code
-```
+`ConfigGen` (`Sources/ConfigGen`) is an `executableTarget` that depends on
+nothing in the package, so `swift run ConfigGen` never needs the files it
+writes to exist first. `make generate` is gated by a `.build/configgen.stamp`
+so it only re-runs when `sqldoc.db` or the generator changes.
 
-Commit `sqldoc.db` **and** the generated files. `config-check` in CI guarantees
-they never drift from the SQL.
+Commit `sqldoc.db`, `config/assets/` (the `.icns` + `icon-master.png`), and
+`Sources/SQLDocCore/Generated/`.
+`config-check` in CI guarantees they never drift from the SQL. (Requires a git
+repo — run `git init` in `sqlswift` first.)
+
+The Go side is the same shape: `//go:generate go run ./cmd/configgen` +
+`make generate` (not yet built — see §4).
 
 ## 3. Injection — Swift / macOS
 
-**New executable target** `ConfigGen` (`Sources/ConfigGen/main.swift`), depends
-only on `Foundation` + `SQLite3` (already a system lib here). It reads
-`sqldoc.db` and writes into `Sources/SQLDocCore/Generated/`:
+Executable target `ConfigGen` (`Sources/ConfigGen/main.swift`), `Foundation` +
+`SQLite3` only. It reads `sqldoc.db` and writes `Sources/SQLDocCore/Generated/`
+— **built and wired** (`make generate`):
 
 ```
-DesignTokens.generated.swift    enum DesignToken  { colours, dimensions, durations }
-BehaviorConfig.generated.swift  enum BehaviorConfig { every setting, typed }
-TypeRoles.generated.swift       enum TypeRole -> Font
-Keybindings.generated.swift     struct AppShortcuts { KeyboardShortcut per action }
-ConnectPragmas.generated.swift  let connectPragmas: [String]
-DocConventions.generated.swift  styleKeyAlias: [String:String], hiddenPrefix
+DesignTokens.swift    enum DesignToken   { ColorToken(light/dark), CGFloat dims, Duration }
+BehaviorConfig.swift  enum BehaviorConfig { every setting, typed, with range in doc-comment }
+TypeRoles.swift       enum TypeRoles      { [SQLDocTypeRole] + role(_:) lookup }
+Keybindings.swift     let sqldocKeybindings: [SQLDocKeybinding]
+ConnectPragmas.swift  let sqldocConnectPragmas: [String]
+DocConventions.swift  enum DocConventions { hiddenTablePrefix, styleKeys, styleKeyAliases }
+AppIdentity.swift     enum AppIdentity   { name, version, bundleId, wordmark, … }
 ```
 
-Shape of the generated token enum (colours resolve light/dark at runtime via a
-tiny hand-written `Color(light:dark:)` helper in core, *not* generated):
+Actual generated shape (colours are `ColorToken(light:"#…", dark:"#…")` — the
+UI layer maps them to `Color` via `AppTheme`; Core stays SwiftUI-free):
 
 ```swift
 public enum DesignToken {
-    public static let page       = Color(light: 0xFFFFFF, dark: 0x202124)
-    public static let ink        = Color(light: 0x202124, dark: 0xE8EAED)
-    public static let accent     = Color(light: 0x2563EB, dark: 0x2563EB)   // overridable
-    public static let rowHeight:      CGFloat = 26      // ← override(token,row-height,mac)
-    public static let toolbarHeight:  CGFloat = 40
-    public static let colMinWidth:    CGFloat = 56
-    public static let transitionFast: Duration = .milliseconds(120)
+    public static let page       = ColorToken(light: "#ffffff", dark: "#202124")
+    public static let accent     = ColorToken(light: "#2563eb", dark: "#2563eb")
+    public static let rowHeight:      CGFloat = 26            // ← override(token,row-height,mac)
+    public static let transitionFast = Duration.milliseconds(120)
+    public static let accentHex      = "#2563eb"
 }
 
 public enum BehaviorConfig {
-    public static let windowBlockRows            = 100   // ← override(setting,window.block_rows,mac)
-    public static let findChunkRows:      Int64  = 250_000
-    public static let colwidthSampleAnchors      = 24
-    public static let colwidthSampleRowsPerAnchor = 12
-    public static let galleryMinTables           = 3
-    public static let galleryMaxTableRowEstimate = 50
-    public static let zoomMin                    = 0.6
-    public static let zoomMax                    = 2.0   // ← override
-    public static let zoomStepMode               = ZoomStepMode.add   // ← override
+    public static let windowBlockRows       = 100   // ← override(setting,window.block_rows,mac)
+    public static let findChunkRows         = 250000
+    public static let colwidthSampleAnchors = 24
+    public static let zoomMax               = 2.0   // ← override
+    public static let zoomStepMode          = "add" // ← override
 }
 ```
 
-Then delete the scattered literals and point the code at the enum:
+Migrate the scattered literals onto these:
 
-| today | becomes |
-|---|---|
-| `Doc.sampleAnchors = 24` (ColumnSampler.swift) | `BehaviorConfig.colwidthSampleAnchors` |
-| `Doc.findChunk = 250_000` (Finder.swift) | `BehaviorConfig.findChunkRows` |
-| `Style(accent: "#2563eb", theme: "auto")` (Style.swift) | `Style(accent: DesignToken.accentHex, theme: "auto")` |
-| `26 * appVM.zoomScale` (VirtualizedGridView) | `DesignToken.rowHeight * appVM.zoomScale` |
-| `zoomScale = min(2.0, …)` (AppViewModel) | clamp to `BehaviorConfig.zoomMax`, step per `zoomStepMode` |
-| `gutterWidth = 60` | `DesignToken.gutterMinWidth` |
-| `applyPragmas()` literal array (SQLiteConnection) | `connectPragmas` (generated) |
-| `loadStyle()` `switch key` aliases (Doc.swift) | `DocConventions.styleKeyAlias` |
-| `.keyboardShortcut("g", modifiers: .command)` for gallery (SQLDocApp.swift) | generated — resolves the ⌘G collision, see §5 |
+| today | becomes | status |
+|---|---|---|
+| `applyPragmas()` literal array (SQLiteConnection.swift) | `sqldocConnectPragmas` | **done** |
+| `let version = "0.3.0"` (SQLDocCLI/main.swift) | `AppIdentity.version` | **done** |
+| `Doc.sampleAnchors = 24` (ColumnSampler.swift) | `BehaviorConfig.colwidthSampleAnchors` | todo |
+| `Doc.findChunk = 250_000` (Finder.swift) | `BehaviorConfig.findChunkRows` | todo |
+| `Style(accent: "#2563eb", …)` (Style.swift) | `DesignToken.accentHex` | todo |
+| `26 * appVM.zoomScale` (VirtualizedGridView) | `DesignToken.rowHeight * appVM.zoomScale` | todo |
+| `zoomScale = min(2.0, …)` (AppViewModel) | `BehaviorConfig.zoomMax` + `zoomStepMode` | todo |
+| `gutterWidth = 60` (Grid views) | `DesignToken.gutterMinWidth` | todo |
+| `loadStyle()` alias `switch` (Doc.swift) | `DocConventions.styleKeyAliases` | todo |
+| gallery `.keyboardShortcut("g", …)` (SQLDocApp.swift) | `sqldocKeybindings` — resolves the ⌘G collision, §5 | todo |
+| inline `Info.plist` echo (Makefile) | `.build/Info.plist` from `ConfigGen --plist` | **done** |
 
-**Phase 1** (recommended first): `ConfigGen` writes committed files; run via
-`make generate`. Works in Xcode with zero plugin friction.
-**Phase 2**: wrap `ConfigGen` in a SwiftPM build-tool plugin attached to
-`SQLDocCore` so regen is automatic and the `Generated/` dir leaves git.
+**Now**: `make generate` writes committed files; gated by `.build/configgen.stamp`.
+**Later**: wrap `ConfigGen` in a SwiftPM build-tool plugin on `SQLDocCore` so
+regen is automatic and `Generated/` leaves git.
 
 ## 4. Injection — Go / web
 
@@ -210,31 +212,32 @@ SELECT key, value FROM v_identity WHERE platform = 'mac';   -- 'all' rows, platf
 * `packaging/macos/Info.plist` + `Viewer-Info.plist` — rendered from templates
   (`*.plist.tmpl`) with `{{.Name}} {{.Version}} {{.BundleID}} …`. Kills the
   `0.2.0` / `0.3.0` and `com.mavgo` / `com.darian` splits.
-* `internal/ui/head.gen.html` — `<title>`, `<link rel="icon" href="/icon.svg">`,
+* `internal/ui/head.gen.html` — `<title>`, `<link rel="icon" sizes="32x32" href="/favicon-32.png">`,
   `<link rel="mask-icon">`, `apple-touch-icon`, `<meta name="theme-color">`,
   `<meta name="application-name">`, `<link rel="manifest" href="/manifest.webmanifest">`.
   `ui.go` gains a `{{HEAD_EXTRA}}` slot; the start-page `<h1>sqldoc</h1>` becomes
   `{{WORDMARK}}`.
-* `internal/server` serves `/favicon.ico`, `/icon.svg`, `/apple-touch-icon.png`,
+* `internal/server` serves `/favicon.ico`, `/favicon-32.png`, `/apple-touch-icon.png`,
   `/manifest.webmanifest` (rendered from `identity`) and the two PNGs — all from
   `embed.FS`.
 
 ### 5.3 The icon
 
-One master, `config/assets/icon.svg` (1024²). `make icons` runs
-`scripts/gen-icons.sh`, which reads the `icon_target` table and renders each
-row from the master:
+The mark is the **tangerine** icon from the sqldoc (Go) repo — a photo on a
+charcoal rounded square, not vector. Two committed assets, both from
+`sqldoc/packaging/macos/sqldoc.icns`:
 
-| output | repo | what it feeds |
+| asset | how | feeds |
 |---|---|---|
-| `config/assets/AppIcon.icns` + `Sources/SQLDocApp/Resources/AppIcon.icns` | sqlswift | SwiftUI `CFBundleIconFile` |
-| `packaging/macos/sqldoc.icns` | sqldoc | Go bundle + nested viewer |
-| `internal/ui/assets/icon.svg` · `favicon.ico` · `apple-touch-icon.png` · `icon-192.png` · `icon-512.png` | sqldoc | web favicon / manifest |
+| `config/assets/AppIcon.icns` | verbatim copy of `sqldoc.icns` | macOS `CFBundleIconFile`; `make app` copies it into the bundle |
+| `config/assets/icon-master.png` | its 1024px face (`iconutil --convert iconset`) | `make icons` renders the web raster set from this |
 
-Rasteriser: `rsvg-convert`, `resvg`, or `sips`; `.icns` via `iconutil`. Commit
-the generated icons (they change rarely); `config-check` flags them stale.
-A separate `config/assets/icon-document.svg` (optional) drives the `.db`
-file-type icon; without it the app icon is reused.
+`make icons` → `scripts/gen-icons.sh` reads `icon_target` and scales
+`icon-master.png` (via `sips` or ImageMagick) into the sqldoc web set —
+`favicon.ico`, `favicon-32.png`, `apple-touch-icon.png`, `icon-192/512.png`
+(needs `--sqldoc ../sqldoc`). The `.icns` files are not regenerated: `sqldoc.icns`
+is upstream, `AppIcon.icns` is its copy. To change the icon, replace
+`sqldoc.icns` upstream and re-copy both assets.
 
 ## 6. Drift this exercise found
 
@@ -253,8 +256,8 @@ down (delete each row once both platforms match the canonical value):
 | bundle id | `com.mavgo.sqldoc` | `com.darian.sqldoc` | **`com.mavgo.sqldoc`** | `identity.bundle_id` |
 | doc type name | "SQLite database" | "SQLite Database" | **"SQLite database"** | `identity.doc_type_name` |
 | `LSHandlerRank` | `Owner` | `Alternate` | keep both | `identity.doc_handler_rank` per platform |
-| app icon | `sqldoc.icns` present | none | **one master SVG → all** | `icon_target` |
-| favicon / theme-color / manifest | none | n/a | **generated** | `identity` + `icon_target` |
+| app icon | tangerine `sqldoc.icns` | none | **share `sqldoc.icns`** (copied to `config/assets/AppIcon.icns`) | `identity.icon.*` |
+| favicon / theme-color / manifest | none | n/a | **generated** from `icon-master.png` + `identity` | `identity` + `icon_target` |
 | accent default | `#2563eb` | `#2563eb` | match ✓ | — |
 | connect pragmas | 5, via DSN/exec | same 5, via exec | match ✓ | now generated from one list |
 | `_style` key aliases | 6 | 6 | match ✓ | now generated |
@@ -271,11 +274,12 @@ stays a 3-key whitelist rather than "anything in `_style`".
 
 ## 8. Rollout
 
-1. Land `config/*.sql` + `sqldoc.db` + `config/assets/icon.svg` + this doc. *(done)*
-2. Swift `ConfigGen` + committed `Generated/`; migrate `SQLDocCore` literals.
-3. Migrate `SQLDocApp` view literals to `DesignToken` / `TypeRole`; wire `AppIdentity` + generated `Info.plist`.
-4. `make icons`; commit the rendered `.icns` and web icon set.
-5. Go `configgen` + `tokens.gen.css` / `config.gen.js` / `config.gen.go` + plist templates + `head.gen.html` + served favicon/manifest.
-6. `make config-check` in CI for both repos.
-7. Burn down the `override` table and the identity drift.
-8. (opt) SwiftPM plugin + `go:generate` fully automated; drop generated files from git.
+1. Land `config/*.sql` + `sqldoc.db` + `config/assets/{AppIcon.icns,icon-master.png}` + this doc. *(done)*
+2. Swift `ConfigGen` + `Sources/SQLDocCore/Generated/`; `make generate` wired into `build`/`release`/`test`. *(done)*
+3. `make generate` also renders `.build/Info.plist`; `make app` consumes it + `AppIcon.icns`. *(done)*
+4. First consumers moved onto generated config: `applyPragmas()` → `sqldocConnectPragmas`, CLI `version` → `AppIdentity.version`. *(done)*
+5. Migrate the rest of the `SQLDocCore` / `SQLDocApp` literals to `BehaviorConfig` / `DesignToken` / `TypeRoles` / `DocConventions` (see §3 table).
+6. Go `configgen` + `tokens.gen.css` / `config.gen.js` / `config.gen.go` + plist templates + `head.gen.html` + served favicon/manifest.
+7. `git init` in `sqlswift`; `make config-check` in CI for both repos.
+8. Burn down the `override` table and the identity drift.
+9. (opt) SwiftPM plugin + `go:generate` fully automated; drop generated files from git.

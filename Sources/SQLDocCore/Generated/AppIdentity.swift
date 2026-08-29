@@ -30,10 +30,10 @@ public enum AppIdentity {
     public static let docUti = "com.mavgo.sqldoc.sqlite"
     /// About box, manifest, .desktop
     public static let homepage = "https://github.com/darianmavgo/sqldoc"
-    /// Master for the .db file-type icon (falls back to icon.master if absent)
-    public static let iconDocumentMaster = "config/assets/icon-document.svg"
-    /// 1024-square vector master; every icon_target renders from this
-    public static let iconMaster = "config/assets/icon.svg"
+    /// Pre-rendered macOS icon, committed as-is; `make app` copies it into the bundle
+    public static let iconAppicns = "config/assets/AppIcon.icns"
+    /// 1024x1024 PNG master for every rendered (non-.icns) icon size
+    public static let iconMaster = "config/assets/icon-master.png"
     /// LSMinimumSystemVersion for the SwiftUI app; also the Package.swift platform floor
     public static let macosMinVersion = "14.0"
     /// Short name: macOS CFBundleName / menu bar, CLI binary, meta[application-name]
