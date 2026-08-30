@@ -205,6 +205,28 @@ public final class SQLiteConnection: @unchecked Sendable {
         }
     }
 
+    /// Prepares `sql`, hands the result column names to `body`, and finalizes.
+    /// Used to label an ad-hoc query's grid even when it returns zero rows.
+    public func withPreparedColumnNames(_ sql: String, _ body: ([String]) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let db else { body([]); return }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { body([]); return }
+        defer { sqlite3_finalize(stmt) }
+        let n = sqlite3_column_count(stmt)
+        var names: [String] = []
+        names.reserveCapacity(Int(n))
+        for i in 0..<n {
+            if let c = sqlite3_column_name(stmt, i) {
+                names.append(String(cString: c))
+            } else {
+                names.append("col\(i + 1)")
+            }
+        }
+        body(names)
+    }
+
     private func bindArgs(stmt: OpaquePointer, args: [Any]) throws {
         for (index, arg) in args.enumerated() {
             let idx = Int32(index + 1)

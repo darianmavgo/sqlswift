@@ -104,6 +104,23 @@ extension Doc {
         return nil
     }
 
+    /// Exact `COUNT(*)` over a filtered set. Runs on the background connection;
+    /// callers should treat it as async work (it is a scan for a non-selective filter).
+    public func filteredCount(table tableName: String, filters: [ColumnFilter]) -> Int64? {
+        guard table(named: tableName) != nil, !filters.isEmpty else { return nil }
+        let cols = (try? columns(for: tableName)) ?? []
+        var clauses: [String] = []
+        var args: [Any] = []
+        for f in filters where cols.contains(where: { $0.name == f.column }) {
+            let (clause, a) = f.sql(quotedColumn: Doc.quoteIdent(f.column))
+            clauses.append("(\(clause))")
+            args.append(contentsOf: a)
+        }
+        guard !clauses.isEmpty else { return nil }
+        let sql = "SELECT COUNT(*) FROM \(Doc.quoteIdent(tableName)) WHERE \(clauses.joined(separator: " AND "))"
+        return (try? bg.queryRow(sql, args: args))?.first?.intValue
+    }
+
     private func runExactCount(for tableName: String) async {
         // Yield to foreground queries
         await waitIdle()

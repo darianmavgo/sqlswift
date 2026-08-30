@@ -1,5 +1,60 @@
 import Foundation
 
+/// One per-column filter from the filter bar.
+public struct ColumnFilter: Equatable, Sendable, Hashable {
+    public enum Op: String, CaseIterable, Sendable {
+        case contains, equals, notEquals, startsWith, greater, less, isNull, isNotNull
+        public var label: String {
+            switch self {
+            case .contains: return "contains"
+            case .equals: return "="
+            case .notEquals: return "≠"
+            case .startsWith: return "starts with"
+            case .greater: return ">"
+            case .less: return "<"
+            case .isNull: return "is null"
+            case .isNotNull: return "is not null"
+            }
+        }
+        public var needsValue: Bool { self != .isNull && self != .isNotNull }
+    }
+
+    public let column: String
+    public let op: Op
+    public let value: String
+
+    public init(column: String, op: Op = .contains, value: String) {
+        self.column = column
+        self.op = op
+        self.value = value
+    }
+
+    /// SQL fragment + bound args for this filter. Column already quoted by caller.
+    func sql(quotedColumn q: String) -> (clause: String, args: [Any]) {
+        switch op {
+        case .contains:    return ("CAST(\(q) AS TEXT) LIKE ? ESCAPE '\\'", ["%\(escapeLike(value))%"])
+        case .startsWith:  return ("CAST(\(q) AS TEXT) LIKE ? ESCAPE '\\'", ["\(escapeLike(value))%"])
+        case .equals:      return ("\(q) = ?", [value])
+        case .notEquals:   return ("(\(q) IS NULL OR \(q) <> ?)", [value])
+        case .greater:     return ("\(q) > ?", [numericBind(value)])
+        case .less:        return ("\(q) < ?", [numericBind(value)])
+        case .isNull:      return ("\(q) IS NULL", [])
+        case .isNotNull:   return ("\(q) IS NOT NULL", [])
+        }
+    }
+
+    private func escapeLike(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "%", with: "\\%")
+         .replacingOccurrences(of: "_", with: "\\_")
+    }
+    private func numericBind(_ s: String) -> Any {
+        if let i = Int64(s) { return i }
+        if let d = Double(s) { return d }
+        return s
+    }
+}
+
 /// Window describes the slice of a table the viewer requests.
 public struct Window: Equatable, Sendable {
     public var table: String
@@ -16,6 +71,10 @@ public struct Window: Equatable, Sendable {
     /// row on the current page. When present (and non-null) the sorted path seeks
     /// past `(afterSortValue, after)` instead of counting `OFFSET` rows.
     public var afterSortValue: SQLiteValue?
+    /// Per-column filters, ANDed together.
+    public var filters: [ColumnFilter]
+    /// Show only rows at ordinals 1, 2, 4, 8, 16, … — a logarithmic spot-check.
+    public var powerSample: Bool
 
     public init(
         table: String,
@@ -27,7 +86,9 @@ public struct Window: Equatable, Sendable {
         desc: Bool = false,
         forceOffset: Bool = false,
         sortNumeric: Bool = false,
-        afterSortValue: SQLiteValue? = nil
+        afterSortValue: SQLiteValue? = nil,
+        filters: [ColumnFilter] = [],
+        powerSample: Bool = false
     ) {
         self.table = table
         self.limit = limit
@@ -39,6 +100,8 @@ public struct Window: Equatable, Sendable {
         self.forceOffset = forceOffset
         self.sortNumeric = sortNumeric
         self.afterSortValue = afterSortValue
+        self.filters = filters
+        self.powerSample = powerSample
     }
 }
 

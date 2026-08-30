@@ -322,6 +322,22 @@ public final class Doc: @unchecked Sendable {
                         s.accent = val
                     case "theme", "dark_mode", "darkmode", "color_scheme":
                         s.theme = val
+                    case "favicon", "icon", "shortcut_icon":
+                        s.favicon = val
+                    case "description":
+                        s.description = val
+                    case "author":
+                        s.author = val
+                    case "font_family", "font":
+                        s.fontFamily = val
+                    case "bg_color", "bg", "background":
+                        s.bgColor = val
+                    case "text_color", "text", "ink":
+                        s.textColor = val
+                    case "custom_css", "css":
+                        s.customCSS = (s.customCSS ?? "") + "\n" + val
+                    case "page_size", "pagesize":
+                        if let n = Int(val), n > 0 { s.pageSize = n }
                     default:
                         break
                     }

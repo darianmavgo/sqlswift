@@ -215,6 +215,76 @@ func runAllTests() async {
         expectEqual(Set(keysetIDs).count, 600)
     }
 
+    // Schema inspector, ad-hoc query, filters, power-sample, exporters
+    await test("Schema+Query: FK/index introspection, read-only query, filters, power2, formats") {
+        let tempDir = NSTemporaryDirectory()
+        let p = (tempDir as NSString).appendingPathComponent("schema_test_\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(atPath: p) }
+
+        let conn = try SQLiteConnection(path: p, readOnly: false)
+        try conn.exec("CREATE TABLE dept (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+        try conn.exec("CREATE TABLE emp (id INTEGER PRIMARY KEY, name TEXT, dept_id INTEGER REFERENCES dept(id), salary INTEGER)")
+        try conn.exec("CREATE INDEX emp_dept ON emp(dept_id)")
+        try conn.exec("INSERT INTO dept VALUES (1,'Eng'),(2,'Sales')")
+        try conn.exec("BEGIN")
+        for i in 1...300 {
+            try conn.exec("INSERT INTO emp VALUES (\(i), 'E\(i)', \(i % 2 + 1), \(50000 + i * 10))")
+        }
+        try conn.exec("COMMIT")
+        conn.close()
+
+        let doc = try Doc.open(path: p)
+        defer { doc.close() }
+
+        // Schema
+        let sch = try doc.tableSchema(for: "emp")
+        expectEqual(sch.columns.count, 4)
+        expectEqual(sch.foreignKeys.count, 1)
+        expectEqual(sch.foreignKeys.first?.table, "dept")
+        expectEqual(sch.foreignKeys.first?.toColumn, "id")
+        expectTrue(sch.indexes.contains { $0.name == "emp_dept" && $0.columns == ["dept_id"] })
+        expectEqual(sch.rowidAlias, "id")
+        expectTrue(sch.ddl.contains("CREATE TABLE"))
+
+        // Read-only query
+        let qr = try doc.runQuery("SELECT name, salary FROM emp WHERE salary > 51000 ORDER BY salary")
+        expectEqual(qr.columns, ["name", "salary"])
+        expectTrue(qr.rows.count > 0)
+        expectEqual(qr.rows.first?[1].intValue, 51010)
+
+        // Write rejected
+        var wrote = true
+        do { _ = try doc.runQuery("DELETE FROM emp"); } catch { wrote = false }
+        expectTrue(!wrote)
+
+        // Filters
+        let filtered = try doc.rows(window: Window(
+            table: "emp", limit: 50,
+            filters: [ColumnFilter(column: "dept_id", op: .equals, value: "1")]
+        ))
+        expectEqual(filtered.path, "filtered")
+        expectTrue(filtered.rows.allSatisfy { $0[2].intValue == 1 })
+        let fc = doc.filteredCount(table: "emp", filters: [ColumnFilter(column: "dept_id", op: .equals, value: "1")])
+        expectEqual(fc, 150)
+
+        // Power sample: ordinals 1,2,4,8,... within 300 rows -> 1,2,4,...,256 = 9 rows
+        let ps = try doc.rows(window: Window(table: "emp", limit: 100, powerSample: true))
+        expectEqual(ps.path, "power2")
+        expectEqual(ps.rows.count, 9)
+        expectEqual(ps.rowIDs, [1, 2, 4, 8, 16, 32, 64, 128, 256])
+
+        // Exporters
+        let md = try doc.export(table: "dept", as: .markdown)
+        expectTrue(md.contains("| id | name |"))
+        expectTrue(md.contains("| 1 | Eng |"))
+        let sql = try doc.export(table: "dept", as: .sql)
+        expectTrue(sql.contains("INSERT INTO \"dept\""))
+        let json = try doc.export(table: "dept", as: .json)
+        expectTrue(json.contains("\"name\": \"Eng\""))
+        let htmlOut = try doc.export(table: "dept", as: .html)
+        expectTrue(htmlOut.contains("<!doctype html>") && htmlOut.contains("<td"))
+    }
+
     // SQLite Connection Tests
     await test("SQLiteConnection: Read-only handle and data extraction") {
         let tempDir = NSTemporaryDirectory()

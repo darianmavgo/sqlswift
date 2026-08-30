@@ -28,7 +28,49 @@ extension Doc {
         var isApprox = false
         var withRowID = false
 
-        if let sortCol = window.sort, !sortCol.isEmpty {
+        // Build the filter WHERE fragment once; several paths splice it in.
+        var filterClause = ""
+        var filterArgs: [Any] = []
+        if !window.filters.isEmpty {
+            let parts = window.filters.compactMap { f -> String? in
+                guard cols.contains(where: { $0.name == f.column }) else { return nil }
+                let (clause, a) = f.sql(quotedColumn: Doc.quoteIdent(f.column))
+                filterArgs.append(contentsOf: a)
+                return "(\(clause))"
+            }
+            if !parts.isEmpty { filterClause = parts.joined(separator: " AND ") }
+        }
+
+        if window.powerSample {
+            // Rows at ordinals 1, 2, 4, 8, 16, … — one pass, any table shape.
+            var ordinals: [Int64] = []
+            var k: Int64 = 1
+            while ordinals.count < limit && k <= 1 << 40 { ordinals.append(k); k <<= 1 }
+            let inList = ordinals.map(String.init).joined(separator: ",")
+            let sel = t.hasRowID ? "rowid, \(colExpr)" : colExpr
+            let whereFilter = filterClause.isEmpty ? "" : "WHERE \(filterClause) "
+            query = """
+                SELECT \(sel) FROM (
+                  SELECT \(sel), ROW_NUMBER() OVER (ORDER BY \(t.hasRowID ? "rowid" : "1")) AS __rn
+                  FROM \(ts.quoted) \(whereFilter)
+                ) WHERE __rn IN (\(inList)) ORDER BY __rn
+                """
+            args = filterArgs
+            path = "power2"
+            withRowID = t.hasRowID
+        } else if !filterClause.isEmpty {
+            // Filtered browsing: offset paging over the filtered set (optionally sorted).
+            let sel = t.hasRowID ? "rowid, \(colExpr)" : colExpr
+            var order = "ORDER BY \(t.hasRowID ? "rowid" : "1")"
+            if let sc = window.sort, !sc.isEmpty {
+                let se = window.sortNumeric ? "CAST(\(Doc.quoteIdent(sc)) AS REAL)" : Doc.quoteIdent(sc)
+                order = "ORDER BY \(se) \(window.desc ? "DESC" : "ASC")\(t.hasRowID ? ", rowid ASC" : "")"
+            }
+            query = "SELECT \(sel) FROM \(ts.quoted) WHERE \(filterClause) \(order) LIMIT ? OFFSET ?"
+            args = filterArgs + [limit, offset]
+            path = "filtered"
+            withRowID = t.hasRowID
+        } else if let sortCol = window.sort, !sortCol.isEmpty {
             let q = Doc.quoteIdent(sortCol)
             // Sort as a number when the caller asked and the storage class allows it.
             let sortExpr = window.sortNumeric ? "CAST(\(q) AS REAL)" : q
