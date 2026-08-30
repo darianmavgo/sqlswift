@@ -1,19 +1,34 @@
 import Foundation
 import SQLite3
 
-/// Shared, thread-safe integer grouping formatter. `NumberFormatter.localizedString`
-/// builds a fresh formatter on every call, which is far too slow to run per cell
-/// per frame — this caches one instance.
+/// Fast integer grouping. `NumberFormatter` costs microseconds per call — far too
+/// much to run per cell — so group the digits by hand with the locale's grouping
+/// separator (resolved once).
 enum SQLiteValueFormat {
-    static let grouped: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.usesGroupingSeparator = true
-        return f
+    private static let groupingSeparator: String = {
+        Locale.current.groupingSeparator ?? ","
     }()
 
     static func integerString(_ v: Int64) -> String {
-        grouped.string(from: NSNumber(value: v)) ?? String(v)
+        let negative = v < 0
+        // Careful with Int64.min, whose magnitude has no positive representation.
+        var digits = String(v.magnitude)
+        guard digits.count > 3 else { return String(v) }
+
+        let sep = groupingSeparator
+        var out = ""
+        out.reserveCapacity(digits.count + digits.count / 3 + 1)
+        let firstGroup = digits.count % 3 == 0 ? 3 : digits.count % 3
+        var idx = digits.startIndex
+        out += digits[idx..<digits.index(idx, offsetBy: firstGroup)]
+        idx = digits.index(idx, offsetBy: firstGroup)
+        while idx < digits.endIndex {
+            out += sep
+            out += digits[idx..<digits.index(idx, offsetBy: 3)]
+            idx = digits.index(idx, offsetBy: 3)
+        }
+        digits.removeAll()
+        return negative ? "-" + out : out
     }
 }
 
@@ -108,24 +123,32 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
     /// A cell string prepared for the grid: display text clamped to `maxChars`
     /// so the view never has to lay out a multi-megabyte string, plus a flag
     /// telling the view the value was clipped (for a hover hint / inspector cue).
+    ///
+    /// Tuned for the common case — a short single-line value — which returns the
+    /// backing string with no allocation or grapheme counting.
     public func gridCell(maxChars: Int) -> (text: String, truncated: Bool) {
         switch self {
         case .text(let s):
-            if s.count > maxChars {
-                return (String(s.prefix(maxChars)).trimmingCharacters(in: .newlines) + "…", true)
-            }
-            // Collapse hard line breaks so a single grid row stays one visual line.
-            if s.contains("\n") || s.contains("\r") {
+            // Fast reject on UTF-8 length; only short strings reach the scan.
+            if s.utf8.count <= maxChars {
+                var hasBreak = false
+                for b in s.utf8 where b == 0x0A || b == 0x0D { hasBreak = true; break }
+                if !hasBreak { return (s, false) }
                 let flattened = s.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).joined(separator: " ")
-                return (flattened, flattened.count != s.count)
+                return (flattened, true)
+            }
+            if s.count > maxChars {
+                return (s.prefix(maxChars).replacingOccurrences(of: "\n", with: " ") + "…", true)
+            }
+            // Between the UTF-8 and grapheme thresholds: keep as-is, just flatten.
+            if s.contains("\n") || s.contains("\r") {
+                return (s.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).joined(separator: " "), true)
             }
             return (s, false)
-        default:
-            let t = displayText
-            if t.count > maxChars {
-                return (String(t.prefix(maxChars)) + "…", true)
-            }
-            return (t, false)
+        case .integer, .real, .null:
+            return (displayText, false)
+        case .blob:
+            return (displayText, false)
         }
     }
 

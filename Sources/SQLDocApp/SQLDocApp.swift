@@ -38,17 +38,20 @@ struct SQLDocApp: App {
         .windowToolbarStyle(.unified(showsTitle: true))
         .commands {
             CommandGroup(replacing: .appInfo) {
-                Button("About \(AppIdentity.displayName)") {
-                    NSApplication.shared.orderFrontStandardAboutPanel(options: [
-                        .applicationName: AppIdentity.displayName,
-                        .applicationVersion: AppIdentity.version,
-                        .version: "\(BuildInfo.commit)\(BuildInfo.dirty ? " (modified)" : "")",
-                        .init(rawValue: "Copyright"): AppIdentity.copyright,
-                        .credits: NSAttributedString(
-                            string: "\(AppIdentity.tagline)\n\n\(BuildInfo.detail)",
-                            attributes: [.font: NSFont.systemFont(ofSize: 10)]
-                        )
-                    ])
+                Button("About \(AppIdentity.displayName)") { Self.showAboutPanel() }
+            }
+
+            // Help menu: version line + one-click copy for bug reports.
+            CommandGroup(replacing: .help) {
+                Button("\(AppIdentity.displayName) \(BuildInfo.summary)") { Self.showAboutPanel() }
+                Button("Copy Version Info") {
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    pb.setString("\(AppIdentity.displayName) \(AppIdentity.version) · \(BuildInfo.detail)", forType: .string)
+                }
+                Divider()
+                Button("Project Homepage") {
+                    if let url = URL(string: AppIdentity.homepage) { NSWorkspace.shared.open(url) }
                 }
             }
 
@@ -125,6 +128,23 @@ struct SQLDocApp: App {
                 .keyboardShortcut("0", modifiers: .command)
             }
         }
+    }
+}
+
+extension SQLDocApp {
+    /// Standard macOS About panel, populated with the marketing version and the
+    /// exact build revision.
+    static func showAboutPanel() {
+        NSApplication.shared.orderFrontStandardAboutPanel(options: [
+            .applicationName: AppIdentity.displayName,
+            .applicationVersion: AppIdentity.version,
+            .version: "\(BuildInfo.commit)\(BuildInfo.dirty ? " (modified)" : "")",
+            .init(rawValue: "Copyright"): AppIdentity.copyright,
+            .credits: NSAttributedString(
+                string: "\(AppIdentity.tagline)\n\n\(BuildInfo.detail)",
+                attributes: [.font: NSFont.systemFont(ofSize: 10)]
+            )
+        ])
     }
 }
 
