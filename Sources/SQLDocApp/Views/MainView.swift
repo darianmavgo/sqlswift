@@ -16,19 +16,9 @@ public struct MainView: View {
             // Top Navigation Bar
             topBarView
 
-            // Docked find strip (pushes content down, never covers data).
-            if appVM.isFindBarVisible, let activeTableVM {
-                FindBarView(tableVM: activeTableVM) {
-                    withAnimation(.easeOut(duration: 0.12)) {
-                        appVM.isFindBarVisible = false
-                        activeTableVM.cancelFind()
-                    }
-                }
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
-            // Main Content Area (Grid / Gallery / Start)
-            ZStack(alignment: .topTrailing) {
+            // Main Content Area (Grid / Gallery / Start), with the find bar
+            // floating over the top-right corner like a browser's find.
+            ZStack {
                 if appVM.activeDocEntry != nil {
                     if appVM.isGalleryView {
                         GalleryView(appVM: appVM)
@@ -72,6 +62,22 @@ public struct MainView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .topTrailing) {
+                if appVM.isFindBarVisible, let activeTableVM {
+                    FindBarView(tableVM: activeTableVM) {
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            appVM.isFindBarVisible = false
+                            activeTableVM.cancelFind()
+                        }
+                    }
+                    .padding(.top, 8)
+                    .padding(.trailing, 14)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .move(edge: .top)),
+                        removal: .opacity
+                    ))
+                }
+            }
 
             // Status Bar
             if let activeTableVM {

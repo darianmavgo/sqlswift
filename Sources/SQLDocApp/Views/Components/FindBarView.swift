@@ -12,6 +12,19 @@ public struct FindBarView: View {
     }
 
     public var body: some View {
+        content
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: DesignToken.radiusPanel))
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignToken.radiusPanel)
+                    .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: DesignToken.radiusPanel))
+            .shadow(color: Color.black.opacity(0.22), radius: 12, x: 0, y: 6)
+            .fixedSize()
+            .onAppear { isFieldFocused = true }
+    }
+
+    private var content: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
@@ -86,23 +99,20 @@ public struct FindBarView: View {
                 .help("Close find (Esc)")
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-
-            // Incremental scan progress.
-            if tableVM.isSearching && tableVM.searchProgress < 1.0 {
-                GeometryReader { geo in
-                    Rectangle()
-                        .fill(Color.accentColor)
-                        .frame(width: max(0, geo.size.width * CGFloat(tableVM.searchProgress)), height: 2)
-                        .animation(.linear(duration: 0.12), value: tableVM.searchProgress)
+            .padding(.vertical, 6)
+            .overlay(alignment: .bottomLeading) {
+                // Incremental scan progress, hugging the bottom edge of the card.
+                if tableVM.isSearching && tableVM.searchProgress < 1.0 {
+                    GeometryReader { geo in
+                        Rectangle()
+                            .fill(Color.accentColor)
+                            .frame(width: max(0, geo.size.width * CGFloat(tableVM.searchProgress)), height: 2)
+                            .animation(.linear(duration: 0.12), value: tableVM.searchProgress)
+                    }
+                    .frame(height: 2)
                 }
-                .frame(height: 2)
-            } else {
-                Divider()
             }
         }
-        .background(Color(NSColor.windowBackgroundColor))
-        .onAppear { isFieldFocused = true }
     }
 
     private var countText: String {
