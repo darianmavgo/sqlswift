@@ -5,6 +5,8 @@ import SQLDocCore
 /// column name and the value itself. Applied only when smart-format is on and
 /// only when the guess is unambiguous, so raw data is never hidden by accident.
 enum CellFormat {
+    enum Kind { case none, time, size, mode }
+
     private static let epochFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm:ss"
@@ -12,48 +14,40 @@ enum CellFormat {
         return f
     }()
 
-    /// Returns a formatted display string, or nil to fall back to the raw text.
-    static func pretty(value: SQLiteValue, column: Column) -> String? {
-        let name = column.name.lowercased()
+    /// Cheap one-time classification by column name — call this per column, not
+    /// per cell, then pass the result to `pretty`.
+    static func kind(forColumn name: String) -> Kind {
+        let n = name.lowercased()
+        if n == "mode" || n.contains("permission") || n.contains("perms") { return .mode }
+        if n == "ts" || n == "time" || n == "date" || n == "timestamp"
+            || n.hasSuffix("_at") || n.hasSuffix("_ts") || n.hasSuffix("_time")
+            || n.hasSuffix("_date") || n.contains("epoch") { return .time }
+        if n.contains("size") || n.contains("bytes") { return .size }
+        return .none
+    }
 
+    /// Returns a formatted display string, or nil to fall back to the raw text.
+    static func pretty(value: SQLiteValue, kind: Kind) -> String? {
+        guard kind != .none else { return nil }
         switch value {
         case .integer(let i):
-            // Unix mode bits: a column called mode/permission/perms with a value
-            // that looks like an octal file mode.
-            if (name == "mode" || name.contains("permission") || name.contains("perms")),
-               i >= 0, i <= 0o7777 {
+            switch kind {
+            case .mode where i >= 0 && i <= 0o7777:
                 return permissions(i)
-            }
-            // Epoch timestamps in a time-ish column.
-            if isTimeColumn(name) {
-                if i > 100_000_000, i < 4_102_444_800 {           // ~1973 .. 2100 in seconds
-                    return epochFormatter.string(from: Date(timeIntervalSince1970: Double(i)))
-                }
-                if i > 100_000_000_000, i < 4_102_444_800_000 {   // milliseconds
-                    return epochFormatter.string(from: Date(timeIntervalSince1970: Double(i) / 1000))
-                }
-            }
-            // Byte sizes.
-            if (name.contains("size") || name.contains("bytes")) && i >= 1024 {
+            case .time where i > 100_000_000 && i < 4_102_444_800:
+                return epochFormatter.string(from: Date(timeIntervalSince1970: Double(i)))
+            case .time where i > 100_000_000_000 && i < 4_102_444_800_000:
+                return epochFormatter.string(from: Date(timeIntervalSince1970: Double(i) / 1000))
+            case .size where i >= 1024:
                 return byteSize(i)
+            default:
+                return nil
             }
-            return nil
-
-        case .real(let r):
-            if isTimeColumn(name), r > 100_000_000, r < 4_102_444_800 {
-                return epochFormatter.string(from: Date(timeIntervalSince1970: r))
-            }
-            return nil
-
+        case .real(let r) where kind == .time && r > 100_000_000 && r < 4_102_444_800:
+            return epochFormatter.string(from: Date(timeIntervalSince1970: r))
         default:
             return nil
         }
-    }
-
-    private static func isTimeColumn(_ name: String) -> Bool {
-        name == "ts" || name == "time" || name == "date" || name == "timestamp"
-            || name.hasSuffix("_at") || name.hasSuffix("_ts") || name.hasSuffix("_time")
-            || name.hasSuffix("_date") || name.contains("epoch")
     }
 
     static func permissions(_ mode: Int64) -> String {

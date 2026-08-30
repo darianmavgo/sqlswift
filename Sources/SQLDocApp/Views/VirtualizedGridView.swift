@@ -28,14 +28,14 @@ public struct VirtualizedGridView: View {
         return max(DesignToken.gutterMinWidth, CGFloat(digits) * 8 * zoom + 20)
     }
 
-    /// (column, its index in the full column list, width, x-offset). Hidden
-    /// columns are dropped; `fullIndex` keeps find/highlight aligned.
-    private var layout: [(col: Column, fullIndex: Int, width: CGFloat, x: CGFloat)] {
-        var out: [(Column, Int, CGFloat, CGFloat)] = []
+    /// (column, its index in the full column list, width, x-offset, format kind).
+    /// Hidden columns are dropped; `fullIndex` keeps find/highlight aligned.
+    private var layout: [(col: Column, fullIndex: Int, width: CGFloat, x: CGFloat, fmt: CellFormat.Kind)] {
+        var out: [(Column, Int, CGFloat, CGFloat, CellFormat.Kind)] = []
         var x: CGFloat = 0
         for (i, col) in tableVM.columns.enumerated() where !tableVM.hiddenColumns.contains(col.name) {
             let w = (tableVM.columnWidths[col.name] ?? DesignToken.colDefaultWidth) * zoom
-            out.append((col, i, w, x))
+            out.append((col, i, w, x, tableVM.smartFormat ? CellFormat.kind(forColumn: col.name) : .none))
             x += w
         }
         return out
@@ -124,7 +124,7 @@ public struct VirtualizedGridView: View {
         )
     }
 
-    private func rowView(page: Page, index: Int, cols: [(col: Column, fullIndex: Int, width: CGFloat, x: CGFloat)], width: CGFloat) -> some View {
+    private func rowView(page: Page, index: Int, cols: [(col: Column, fullIndex: Int, width: CGFloat, x: CGFloat, fmt: CellFormat.Kind)], width: CGFloat) -> some View {
         let rowOrdinal = page.start + Int64(index) + 1
         let rowID = index < page.rowIDs.count ? page.rowIDs[index] : nil
         let isRowMatched = rowID != nil && rowID == tableVM.activeMatchRowID
@@ -161,7 +161,7 @@ public struct VirtualizedGridView: View {
                     zoom: zoom,
                     palette: palette,
                     wrap: tableVM.wrapCells,
-                    smartText: tableVM.smartFormat ? CellFormat.pretty(value: cellVal, column: entry.col) : nil,
+                    smartText: CellFormat.pretty(value: cellVal, kind: entry.fmt),
                     showHighlight: tableVM.cellMatches(row: index, col: c),
                     highlightQuery: tableVM.searchQuery,
                     isSelected: isCellSelected,
