@@ -7,7 +7,7 @@ public enum AppIdentity {
     /// PWA manifest background_color — tracks the --ground token
     public static let backgroundColor = "#d6d9dc"
     /// CFBundleVersion / build metadata
-    public static let build = "1"
+    public static let build = "2"
     /// Primary macOS + UTI reverse-DNS prefix
     public static let bundleId = "com.mavgo.sqldoc"
     /// Nested native-window bundle (Go sqldoc-view)
@@ -29,7 +29,7 @@ public enum AppIdentity {
     /// Exported UTI for the document type
     public static let docUti = "com.mavgo.sqldoc.sqlite"
     /// About box, manifest, .desktop
-    public static let homepage = "https://github.com/darianmavgo/sqldoc"
+    public static let homepage = "https://github.com/darianmavgo/sqlswift"
     /// Pre-rendered macOS icon, committed as-is; `make app` copies it into the bundle
     public static let iconAppicns = "config/assets/AppIcon.icns"
     /// 1024x1024 PNG master for every rendered (non-.icns) icon size
@@ -45,7 +45,7 @@ public enum AppIdentity {
     /// Browser chrome colour (meta theme-color / manifest) — tracks the --toolbar token
     public static let themeColor = "#323639"
     /// Marketing version: CFBundleShortVersionString, `--version`, start-page footer
-    public static let version = "0.3.0"
+    public static let version = "1.1.0"
     /// Start-page footer / `--version` detail line
     public static let versionLineFormat = "{app} {version} · {driver}"
     /// Window / browser-tab title; {document} = _style.title or filename
