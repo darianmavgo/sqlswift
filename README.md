@@ -10,6 +10,8 @@ universal binary.
 > Marketing name: **sqldoc** (the app bundle, the CLI, the menu bar).
 > Repository name: **sqlswift** (the Swift rewrite of the original Go `sqldoc`).
 
+![sqldoc 1.1.0 showing the sample telemetry database](docs/screenshots/sqldoc-1.1.0.png)
+
 ---
 
 ## Why it exists
