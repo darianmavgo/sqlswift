@@ -2,13 +2,15 @@ import SwiftUI
 import AppKit
 import SQLDocCore
 
-public struct CellInspectInfo: Identifiable, Sendable {
+public struct CellInspectInfo: Identifiable, @unchecked Sendable {
     public let id = UUID()
     public let tableName: String
     public let colName: String
     public let colType: String
     public let value: SQLiteValue
     public let rowOrdinal: Int64
+    /// For blob cells: how to fetch the actual bytes (rowid known → lazy load).
+    public var loadBlob: (() -> Data?)? = nil
 
     public init(tableName: String, colName: String, colType: String, value: SQLiteValue, rowOrdinal: Int64) {
         self.tableName = tableName
@@ -47,6 +49,13 @@ public final class AppViewModel: ObservableObject {
 
     // Cell Inspector
     @Published public var inspectingCell: CellInspectInfo? = nil
+
+    // Sheets / panels
+    @Published public var showSchemaSheet: Bool = false
+    @Published public var showQueryConsole: Bool = false
+    @Published public var showJumpToRow: Bool = false
+    @Published public var showSidebar: Bool = false
+    @Published public var showFilterBar: Bool = false
 
     // Selection state
     @Published public var selectedCell: (row: Int, col: Int)? = nil
@@ -92,7 +101,36 @@ public final class AppViewModel: ObservableObject {
             setActiveDocument(entry)
             errorMessage = nil
         } catch {
+            // Not a SQLite file? Try converting a plain-text format we understand.
+            if FileImporter.canImport(path: path) {
+                importAndOpen(path: path)
+                return
+            }
+            let ext = (path as NSString).pathExtension.lowercased()
+            if ["xlsx", "xls", "pdf"].contains(ext) {
+                errorMessage = ".\(ext) import isn't supported yet — convert it to CSV or SQLite first."
+                return
+            }
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func importAndOpen(path: String) {
+        let name = (path as NSString).lastPathComponent
+        setBusy(title: "Importing \(name)", message: "Converting to SQLite…")
+        Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                let dbPath = try FileImporter.importToTempDB(path: path)
+                await MainActor.run {
+                    self?.clearBusy()
+                    self?.open(path: dbPath)
+                }
+            } catch {
+                await MainActor.run {
+                    self?.clearBusy()
+                    self?.errorMessage = "Import failed: \(error.localizedDescription)"
+                }
+            }
         }
     }
 
@@ -195,19 +233,25 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
-    public func exportCurrentTable() {
+    public func exportCurrentTable(as format: ExportFormat = .csv) {
         guard let doc = activeDocEntry?.doc, !selectedTableName.isEmpty else { return }
-        do {
-            let csv = try doc.exportCSV(for: selectedTableName)
-            let panel = NSSavePanel()
-            panel.nameFieldStringValue = "\(selectedTableName).csv"
-            panel.allowedContentTypes = [.commaSeparatedText]
+        let table = selectedTableName
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(table).\(format.fileExtension)"
+        guard panel.runModal() == .OK, let targetURL = panel.url else { return }
 
-            if panel.runModal() == .OK, let targetURL = panel.url {
-                try csv.write(to: targetURL, atomically: true, encoding: .utf8)
+        setBusy(title: "Exporting \(table)", message: format.label)
+        Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                let text = try doc.export(table: table, as: format)
+                try text.write(to: targetURL, atomically: true, encoding: .utf8)
+                await MainActor.run { self?.clearBusy() }
+            } catch {
+                await MainActor.run {
+                    self?.clearBusy()
+                    self?.errorMessage = "Export failed: \(error.localizedDescription)"
+                }
             }
-        } catch {
-            errorMessage = "Export failed: \(error.localizedDescription)"
         }
     }
 

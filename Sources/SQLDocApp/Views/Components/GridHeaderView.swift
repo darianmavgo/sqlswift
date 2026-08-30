@@ -31,7 +31,7 @@ public struct GridHeaderView: View {
                 .padding(.trailing, 8)
                 .frame(width: gutterWidth, height: headerHeight, alignment: .trailing)
 
-            ForEach(tableVM.columns) { col in
+            ForEach(tableVM.visibleColumns) { col in
                 headerCell(col)
             }
         }

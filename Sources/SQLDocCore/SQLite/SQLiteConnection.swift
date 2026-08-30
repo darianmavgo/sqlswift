@@ -205,6 +205,23 @@ public final class SQLiteConnection: @unchecked Sendable {
         }
     }
 
+    /// Runs a query expected to return a single BLOB in the first column of the
+    /// first row, and returns its raw bytes. Used by the cell inspector — blob
+    /// bytes are otherwise never materialized.
+    public func queryBlob(_ sql: String, args: [Any] = []) throws -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let db else { return nil }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        try bindArgs(stmt: stmt, args: args)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        guard let ptr = sqlite3_column_blob(stmt, 0) else { return Data() }
+        let n = Int(sqlite3_column_bytes(stmt, 0))
+        return Data(bytes: ptr, count: n)
+    }
+
     /// Prepares `sql`, hands the result column names to `body`, and finalizes.
     /// Used to label an ad-hoc query's grid even when it returns zero rows.
     public func withPreparedColumnNames(_ sql: String, _ body: ([String]) -> Void) {

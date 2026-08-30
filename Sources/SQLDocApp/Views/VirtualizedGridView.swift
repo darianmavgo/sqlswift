@@ -14,7 +14,7 @@ public struct VirtualizedGridView: View {
     }
 
     private var zoom: CGFloat { CGFloat(appVM.zoomScale) }
-    private var rowHeight: CGFloat { DesignToken.rowHeight * zoom }
+    private var rowHeight: CGFloat { DesignToken.rowHeight * zoom * CGFloat(tableVM.rowHeightScale) }
 
     private var palette: GridPalette {
         let accent = appVM.activeDocEntry.map { AppTheme.color(from: $0.doc.style.accent) } ?? .accentColor
@@ -28,13 +28,14 @@ public struct VirtualizedGridView: View {
         return max(DesignToken.gutterMinWidth, CGFloat(digits) * 8 * zoom + 20)
     }
 
-    /// (column, width, x-offset) for the current widths — computed once per body.
-    private var layout: [(col: Column, width: CGFloat, x: CGFloat)] {
-        var out: [(Column, CGFloat, CGFloat)] = []
+    /// (column, its index in the full column list, width, x-offset). Hidden
+    /// columns are dropped; `fullIndex` keeps find/highlight aligned.
+    private var layout: [(col: Column, fullIndex: Int, width: CGFloat, x: CGFloat)] {
+        var out: [(Column, Int, CGFloat, CGFloat)] = []
         var x: CGFloat = 0
-        for col in tableVM.columns {
+        for (i, col) in tableVM.columns.enumerated() where !tableVM.hiddenColumns.contains(col.name) {
             let w = (tableVM.columnWidths[col.name] ?? DesignToken.colDefaultWidth) * zoom
-            out.append((col, w, x))
+            out.append((col, i, w, x))
             x += w
         }
         return out
@@ -62,6 +63,13 @@ public struct VirtualizedGridView: View {
         .onAppear { isGridFocused = !appVM.isFindBarVisible }
         .onChange(of: appVM.isFindBarVisible) { _, visible in
             isGridFocused = !visible
+        }
+        .onChange(of: tableVM.currentPage?.start) { _, _ in
+            if let idx = tableVM.consumePendingSelection(),
+               let page = tableVM.currentPage, idx < page.rows.count {
+                appVM.selectedRowIndex = idx
+                appVM.selectedCell = (row: idx, col: layout.first?.fullIndex ?? 0)
+            }
         }
     }
 
@@ -116,7 +124,7 @@ public struct VirtualizedGridView: View {
         )
     }
 
-    private func rowView(page: Page, index: Int, cols: [(col: Column, width: CGFloat, x: CGFloat)], width: CGFloat) -> some View {
+    private func rowView(page: Page, index: Int, cols: [(col: Column, fullIndex: Int, width: CGFloat, x: CGFloat)], width: CGFloat) -> some View {
         let rowOrdinal = page.start + Int64(index) + 1
         let rowID = index < page.rowIDs.count ? page.rowIDs[index] : nil
         let isRowMatched = rowID != nil && rowID == tableVM.activeMatchRowID
@@ -127,20 +135,22 @@ public struct VirtualizedGridView: View {
                 .font(.system(size: 11 * zoom, weight: .regular, design: .monospaced))
                 .foregroundColor(palette.dim)
                 .padding(.trailing, 8)
-                .frame(width: gutterWidth, height: rowHeight, alignment: .trailing)
+                .frame(width: gutterWidth, height: rowHeight, alignment: .top)
+                .padding(.top, 4)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     appVM.selectedRowIndex = index
-                    appVM.selectedCell = (row: index, col: 0)
+                    appVM.selectedCell = (row: index, col: cols.first?.fullIndex ?? 0)
                     isGridFocused = true
                 }
 
-            ForEach(Array(cols.enumerated()), id: \.element.col.id) { colIdx, entry in
-                let cellText = (index < page.text.count && colIdx < page.text[index].count)
-                    ? page.text[index][colIdx] : CellText(text: "", truncated: false)
-                let cellVal = colIdx < page.rows[index].count ? page.rows[index][colIdx] : SQLiteValue.null
-                let isActiveMatchCell = isRowMatched && colIdx == tableVM.activeMatchColumnIndex
-                let isCellSelected = appVM.selectedCell?.row == index && appVM.selectedCell?.col == colIdx
+            ForEach(cols, id: \.col.id) { entry in
+                let c = entry.fullIndex
+                let cellText = (index < page.text.count && c < page.text[index].count)
+                    ? page.text[index][c] : CellText(text: "", truncated: false)
+                let cellVal = c < page.rows[index].count ? page.rows[index][c] : SQLiteValue.null
+                let isActiveMatchCell = isRowMatched && c == tableVM.activeMatchColumnIndex
+                let isCellSelected = appVM.selectedCell?.row == index && appVM.selectedCell?.col == c
 
                 CellView(
                     cell: cellText,
@@ -150,16 +160,18 @@ public struct VirtualizedGridView: View {
                     height: rowHeight,
                     zoom: zoom,
                     palette: palette,
-                    showHighlight: tableVM.cellMatches(row: index, col: colIdx),
+                    wrap: tableVM.wrapCells,
+                    smartText: tableVM.smartFormat ? CellFormat.pretty(value: cellVal, column: entry.col) : nil,
+                    showHighlight: tableVM.cellMatches(row: index, col: c),
                     highlightQuery: tableVM.searchQuery,
                     isSelected: isCellSelected,
                     isActiveMatch: isActiveMatchCell
                 )
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { inspect(page: page, row: index, col: colIdx) }
+                .onTapGesture(count: 2) { inspect(page: page, row: index, col: c) }
                 .onTapGesture {
                     appVM.selectedRowIndex = index
-                    appVM.selectedCell = (row: index, col: colIdx)
+                    appVM.selectedCell = (row: index, col: c)
                     isGridFocused = true
                 }
             }
@@ -191,13 +203,19 @@ public struct VirtualizedGridView: View {
         let value = col < page.rows[row].count ? page.rows[row][col] : SQLiteValue.null
         appVM.selectedRowIndex = row
         appVM.selectedCell = (row: row, col: col)
-        appVM.inspectingCell = CellInspectInfo(
+        var info = CellInspectInfo(
             tableName: tableVM.tableName,
             colName: column.name,
             colType: column.type,
             value: value,
             rowOrdinal: page.start + Int64(row) + 1
         )
+        if case .blob = value, row < page.rowIDs.count, page.rowIDs[row] != 0 {
+            let doc = tableVM.doc, table = tableVM.tableName, colName = column.name
+            let rowID = page.rowIDs[row]
+            info.loadBlob = { doc.blobData(table: table, column: colName, rowID: rowID) }
+        }
+        appVM.inspectingCell = info
     }
 
     private func emptyState(icon: String, message: String) -> some View {
@@ -248,9 +266,10 @@ public struct VirtualizedGridView: View {
     private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
         guard let page = tableVM.currentPage, !page.rows.isEmpty else { return .ignored }
         let maxRow = page.rows.count - 1
-        let maxCol = max(0, tableVM.columns.count - 1)
+        let visible = layout.map { $0.fullIndex }               // full-index of each shown column, in order
         let curRow = appVM.selectedCell?.row ?? 0
-        let curCol = appVM.selectedCell?.col ?? 0
+        let curCol = appVM.selectedCell?.col ?? (visible.first ?? 0)
+        let curVisPos = visible.firstIndex(of: curCol) ?? 0
 
         switch press.key {
         case .upArrow:
@@ -262,10 +281,10 @@ public struct VirtualizedGridView: View {
             appVM.selectedCell = (r, curCol); appVM.selectedRowIndex = r
             return .handled
         case .leftArrow:
-            appVM.selectedCell = (curRow, max(0, curCol - 1))
+            appVM.selectedCell = (curRow, visible[max(0, curVisPos - 1)])
             return .handled
         case .rightArrow:
-            appVM.selectedCell = (curRow, min(maxCol, curCol + 1))
+            appVM.selectedCell = (curRow, visible[min(visible.count - 1, curVisPos + 1)])
             return .handled
         case .pageUp:
             tableVM.previousPage(); return .handled
@@ -395,6 +414,8 @@ public struct CellView: View {
     let height: CGFloat
     let zoom: CGFloat
     let palette: GridPalette
+    var wrap: Bool = false
+    var smartText: String? = nil
     let showHighlight: Bool
     let highlightQuery: String
     let isSelected: Bool
@@ -408,13 +429,16 @@ public struct CellView: View {
         }
     }
 
+    private var shownText: String { smartText ?? cell.text }
+
     public var body: some View {
         content
             .font(font)
-            .lineLimit(1)
+            .lineLimit(wrap ? nil : 1)
             .truncationMode(.tail)
             .padding(.horizontal, 8)
-            .frame(width: width, height: height, alignment: trailing ? .trailing : .leading)
+            .padding(.vertical, wrap ? 3 : 0)
+            .frame(width: width, height: height, alignment: alignment)
             .background(
                 isActiveMatch ? palette.activeMatchFill
                     : (isSelected ? palette.selectionFill : Color.clear)
@@ -424,13 +448,25 @@ public struct CellView: View {
                     ? RoundedRectangle(cornerRadius: 2).stroke(Color.accentColor, lineWidth: 1.5)
                     : nil
             )
-            .help(cell.truncated ? "\(value.displayText.count) characters — double-click to inspect" : "")
+            .help(helpText)
+    }
+
+    private var alignment: Alignment {
+        let h: HorizontalAlignment = trailing ? .trailing : .leading
+        return wrap ? Alignment(horizontal: h, vertical: .top) : Alignment(horizontal: h, vertical: .center)
+    }
+
+    private var helpText: String {
+        if smartText != nil { return "raw: \(value.displayText)" }
+        return cell.truncated ? "\(value.displayText.count) characters — double-click to inspect" : ""
     }
 
     @ViewBuilder
     private var content: some View {
         if value.isNull {
             Text("NULL").foregroundColor(palette.dim.opacity(0.7))
+        } else if smartText != nil {
+            Text(shownText).foregroundColor(palette.ink)
         } else if showHighlight && !highlightQuery.isEmpty {
             Text(highlighted(cell.text, query: highlightQuery))
         } else if case .blob = value {

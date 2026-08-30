@@ -13,6 +13,23 @@ public struct StatusBarView: View {
 
             pager
 
+            if let job = tableVM.backgroundJob {
+                Label(job, systemImage: "hourglass")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+            }
+
+            if tableVM.powerSampleMode {
+                Label("power-2 sample", systemImage: "chart.bar.doc.horizontal")
+                    .font(.system(size: 11)).foregroundColor(.accentColor)
+            } else if !tableVM.filters.isEmpty {
+                HStack(spacing: 3) {
+                    Image(systemName: "line.3.horizontal.decrease.circle.fill").font(.system(size: 9))
+                    Text(tableVM.filteredCount.map { "\($0) filtered" } ?? "filtered")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(.accentColor)
+            }
+
             if tableVM.isSorting {
                 Label("sorting…", systemImage: "arrow.up.arrow.down")
                     .font(.system(size: 11))
@@ -37,6 +54,30 @@ public struct StatusBarView: View {
             }
 
             Spacer()
+
+            // Display options
+            Menu {
+                Picker("Row height", selection: Binding(
+                    get: { tableVM.rowHeightScale },
+                    set: { tableVM.rowHeightScale = $0 }
+                )) {
+                    Text("Compact").tag(1.0)
+                    Text("Regular").tag(2.0)
+                    Text("Tall").tag(3.0)
+                }
+                Toggle("Wrap cell text", isOn: Binding(
+                    get: { tableVM.wrapCells }, set: { tableVM.wrapCells = $0 }))
+                Toggle("Smart formatting", isOn: Binding(
+                    get: { tableVM.smartFormat }, set: { tableVM.smartFormat = $0 }))
+            } label: {
+                Image(systemName: "textformat.size").font(.system(size: 11))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Display options")
+
+            Divider().frame(height: 12)
 
             if let doc = appVM.activeDocEntry {
                 HStack(spacing: 4) {
@@ -78,7 +119,10 @@ public struct StatusBarView: View {
                 let startRow = page.start + 1
                 let endRow = page.start + Int64(page.rows.count)
                 let approx = page.approx ? "~" : ""
-                Text("\(startRow)–\(endRow) / \(tableVM.tableCount.displayString)\(approx)")
+                let total: String = tableVM.powerSampleMode ? "\(page.rows.count)"
+                    : (!tableVM.filters.isEmpty ? (tableVM.filteredCount.map(String.init) ?? "…")
+                       : tableVM.tableCount.displayString)
+                Text("\(startRow)–\(endRow) / \(total)\(approx)")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(.secondary)
                     .frame(minWidth: 90)

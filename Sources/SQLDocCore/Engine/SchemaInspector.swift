@@ -65,6 +65,13 @@ extension Doc {
         )
     }
 
+    /// Raw bytes of a BLOB cell, fetched by rowid. Returns nil for non-rowid tables.
+    public func blobData(table tableName: String, column: String, rowID: Int64) -> Data? {
+        guard let t = table(named: tableName), t.hasRowID else { return nil }
+        let sql = "SELECT \(Doc.quoteIdent(column)) FROM \(Doc.quoteIdent(tableName)) WHERE rowid = ? LIMIT 1"
+        return try? bg.queryBlob(sql, args: [rowID])
+    }
+
     // MARK: - Ad-hoc read-only query (the console)
 
     public static let queryRowCap = 5000

@@ -40,7 +40,27 @@ public final class TableViewModel: ObservableObject {
     // the page or query changes — never per render/scroll frame.
     @Published public var highlightMask: [[Bool]] = []
 
+    // Filter bar
+    @Published public var filters: [ColumnFilter] = []
+    @Published public var filteredCount: Int64? = nil
+
+    // Power-2 spot-check
+    @Published public var powerSampleMode: Bool = false
+
+    // Display
+    @Published public var hiddenColumns: Set<String> = []
+    @Published public var rowHeightScale: Double = 1.0   // 1 = compact, 2 = regular, 3 = tall
+    @Published public var wrapCells: Bool = false
+    @Published public var smartFormat: Bool = true
+
+    // Background-job label for the status bar ("counting…", "sampling…")
+    @Published public var backgroundJob: String? = nil
+
+    /// Columns actually shown in the grid (order preserved, hidden removed).
+    public var visibleColumns: [Column] { columns.filter { !hiddenColumns.contains($0.name) } }
+
     private var findTask: Task<Void, Never>?
+    private var filterCountTask: Task<Void, Never>?
 
     // Every load bumps this; a stale detached result whose generation no longer
     // matches is dropped instead of clobbering a newer page.
@@ -61,6 +81,7 @@ public final class TableViewModel: ObservableObject {
 
     deinit {
         findTask?.cancel()
+        filterCountTask?.cancel()
         // Detach this table's background observers.
         doc.counterWorker.setObserver(for: tableName, nil)
         doc.columnSampler.setObserver(for: tableName, nil)
@@ -68,8 +89,8 @@ public final class TableViewModel: ObservableObject {
 
     /// Called when this VM is evicted from the cache.
     public func dispose() {
-        findTask?.cancel()
-        findTask = nil
+        findTask?.cancel(); findTask = nil
+        filterCountTask?.cancel(); filterCountTask = nil
         doc.counterWorker.setObserver(for: tableName, nil)
         doc.columnSampler.setObserver(for: tableName, nil)
     }
@@ -105,6 +126,16 @@ public final class TableViewModel: ObservableObject {
         }
         _ = doc.columnHints(for: tableName)
 
+        // Restore persisted per-table preferences.
+        self.hiddenColumns = StatePersistenceManager.shared.loadHiddenColumns(dbID: docID, table: tableName)
+            .intersection(Set(columns.map { $0.name }))
+        if let s = StatePersistenceManager.shared.loadSort(dbID: docID, table: tableName),
+           columns.contains(where: { $0.name == s.column }) {
+            self.sortColumn = s.column
+            self.isSortDesc = s.desc
+            self.sortNumeric = s.numeric
+        }
+
         // The actual first query runs off the main thread.
         loadPage(offset: 0)
     }
@@ -120,7 +151,9 @@ public final class TableViewModel: ObservableObject {
             offset: clampedOffset,
             sort: sortColumn,
             desc: isSortDesc,
-            sortNumeric: sortNumeric
+            sortNumeric: sortNumeric,
+            filters: filters,
+            powerSample: powerSampleMode
         )
         runLoad(window)
     }
@@ -128,6 +161,12 @@ public final class TableViewModel: ObservableObject {
     public func nextPage() {
         guard let page = currentPage, !page.rows.isEmpty else { return }
         let limit = page.rows.count
+
+        if powerSampleMode { return }
+        if !filters.isEmpty {
+            loadPage(offset: currentOffset + Int64(limit))
+            return
+        }
 
         if sortColumn == nil, let lastRowID = page.rowIDs.last {
             // Unsorted sequential scroll: exact O(log n) keyset seek.
@@ -166,12 +205,85 @@ public final class TableViewModel: ObservableObject {
     }
 
     public func loadLastPage() {
-        if tableCount.known && tableCount.rows > 0 {
-            let limit: Int64 = 100
-            loadPage(offset: max(0, tableCount.rows - limit))
+        if powerSampleMode { return }
+        let total = !filters.isEmpty ? filteredCount : (tableCount.known ? tableCount.rows : nil)
+        if let total, total > 0 {
+            loadPage(offset: max(0, total - 100))
         } else {
             nextPage()
         }
+    }
+
+    // MARK: - Filters
+
+    public func setFilter(column: String, op: ColumnFilter.Op, value: String) {
+        filters.removeAll { $0.column == column }
+        if op.needsValue && value.isEmpty {
+            applyFiltersChanged()
+            return
+        }
+        filters.append(ColumnFilter(column: column, op: op, value: value))
+        applyFiltersChanged()
+    }
+
+    public func clearFilters() {
+        guard !filters.isEmpty else { return }
+        filters = []
+        filteredCount = nil
+        loadPage(offset: 0)
+    }
+
+    private func applyFiltersChanged() {
+        loadPage(offset: 0)
+        filterCountTask?.cancel()
+        guard !filters.isEmpty else { filteredCount = nil; return }
+        let docRef = doc
+        let table = tableName
+        let fs = filters
+        backgroundJob = "counting…"
+        filterCountTask = Task.detached(priority: .utility) { [weak self] in
+            let n = docRef.filteredCount(table: table, filters: fs)
+            await MainActor.run {
+                guard let self, self.filters == fs else { return }
+                self.filteredCount = n
+                self.backgroundJob = nil
+            }
+        }
+    }
+
+    // MARK: - Power-2 spot-check
+
+    public func togglePowerSample() {
+        powerSampleMode.toggle()
+        loadPage(offset: 0)
+    }
+
+    // MARK: - Jump to row
+
+    /// Scroll so the row at 1-based ordinal `n` is on the current page.
+    public func jumpToOrdinal(_ n: Int64) {
+        let target = max(1, n) - 1
+        loadPage(offset: (target / 100) * 100)
+        appHighlightRow(atPageIndex: Int(target % 100))
+    }
+
+    private var pendingSelectRow: Int?
+    private func appHighlightRow(atPageIndex idx: Int) { pendingSelectRow = idx }
+    public func consumePendingSelection() -> Int? {
+        defer { pendingSelectRow = nil }
+        return pendingSelectRow
+    }
+
+    // MARK: - Columns show/hide
+
+    public func setColumn(_ name: String, hidden: Bool) {
+        if hidden { hiddenColumns.insert(name) } else { hiddenColumns.remove(name) }
+        StatePersistenceManager.shared.saveHiddenColumns(dbID: docID, table: tableName, hidden: hiddenColumns)
+    }
+
+    public func showAllColumns() {
+        hiddenColumns.removeAll()
+        StatePersistenceManager.shared.saveHiddenColumns(dbID: docID, table: tableName, hidden: [])
     }
 
     /// The sort-column value of the last row on a page, for keyset anchoring.
@@ -224,6 +336,7 @@ public final class TableViewModel: ObservableObject {
             sortNumeric = columns.first(where: { $0.name == column })?.isNumeric ?? false
         }
         isSorting = true
+        persistSort()
         loadPage(offset: 0)
     }
 
@@ -236,6 +349,7 @@ public final class TableViewModel: ObservableObject {
             sortNumeric = false
         }
         isSorting = true
+        persistSort()
         loadPage(offset: 0)
     }
 
@@ -243,7 +357,14 @@ public final class TableViewModel: ObservableObject {
         guard sortColumn != nil else { return }
         sortNumeric.toggle()
         isSorting = true
+        persistSort()
         loadPage(offset: 0)
+    }
+
+    private func persistSort() {
+        StatePersistenceManager.shared.saveSort(
+            dbID: docID, table: tableName,
+            column: sortColumn, desc: isSortDesc, numeric: sortNumeric)
     }
 
     // MARK: - Column widths

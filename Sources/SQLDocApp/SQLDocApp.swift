@@ -87,9 +87,41 @@ struct SQLDocApp: App {
                 }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(appVM.activeDocEntry == nil)
+
+                Button("Filter Columns") {
+                    appVM.showFilterBar.toggle()
+                }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                .disabled(appVM.activeDocEntry == nil)
+
+                Button("Jump to Row…") {
+                    appVM.showJumpToRow = true
+                }
+                .keyboardShortcut("l", modifiers: .command)
+                .disabled(appVM.activeDocEntry == nil)
             }
 
             CommandGroup(after: .toolbar) {
+                Button("Table Schema…") {
+                    appVM.showSchemaSheet = true
+                }
+                .keyboardShortcut("i", modifiers: .command)
+                .disabled(appVM.selectedTableName.isEmpty)
+
+                Button("Query Console…") {
+                    appVM.showQueryConsole = true
+                }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
+                .disabled(appVM.activeDocEntry == nil)
+
+                Button("Toggle Table Sidebar") {
+                    appVM.showSidebar.toggle()
+                }
+                .keyboardShortcut("s", modifiers: [.command, .option])
+                .disabled(appVM.activeDocEntry == nil)
+
+                Divider()
+
                 Button("Toggle Gallery View") {
                     appVM.isGalleryView.toggle()
                 }

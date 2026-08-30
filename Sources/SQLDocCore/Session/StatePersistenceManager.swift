@@ -22,6 +22,8 @@ public final class StatePersistenceManager: @unchecked Sendable {
     private let keyTheme = "sqldoc.settings.theme"
     private let keyZoom = "sqldoc.settings.zoom"
     private let keyColWidthPrefix = "sqldoc.colwidths."
+    private let keySortPrefix = "sqldoc.sort."
+    private let keyHiddenColsPrefix = "sqldoc.hiddencols."
 
     public init() {}
 
@@ -82,5 +84,40 @@ public final class StatePersistenceManager: @unchecked Sendable {
         defer { lock.unlock() }
         let key = "\(keyColWidthPrefix)\(dbID):\(table)"
         defaults.removeObject(forKey: key)
+    }
+
+    // MARK: - Sort preference (per table)
+
+    /// (column, descending, numeric). column == nil clears the stored sort.
+    public func saveSort(dbID: String, table: String, column: String?, desc: Bool, numeric: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        let key = "\(keySortPrefix)\(dbID):\(table)"
+        if let column {
+            defaults.set(["c": column, "d": desc ? "1" : "0", "n": numeric ? "1" : "0"], forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    public func loadSort(dbID: String, table: String) -> (column: String, desc: Bool, numeric: Bool)? {
+        lock.lock(); defer { lock.unlock() }
+        let key = "\(keySortPrefix)\(dbID):\(table)"
+        guard let d = defaults.dictionary(forKey: key) as? [String: String], let c = d["c"] else { return nil }
+        return (c, d["d"] == "1", d["n"] == "1")
+    }
+
+    // MARK: - Hidden columns (per table)
+
+    public func saveHiddenColumns(dbID: String, table: String, hidden: Set<String>) {
+        lock.lock(); defer { lock.unlock() }
+        let key = "\(keyHiddenColsPrefix)\(dbID):\(table)"
+        if hidden.isEmpty { defaults.removeObject(forKey: key) }
+        else { defaults.set(Array(hidden), forKey: key) }
+    }
+
+    public func loadHiddenColumns(dbID: String, table: String) -> Set<String> {
+        lock.lock(); defer { lock.unlock() }
+        let key = "\(keyHiddenColsPrefix)\(dbID):\(table)"
+        return Set((defaults.array(forKey: key) as? [String]) ?? [])
     }
 }

@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 public struct MainView: View {
     @ObservedObject public var appVM: AppViewModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var tableVMCache: [String: TableViewModel] = [:]
     @State private var activeTableVM: TableViewModel?
 
@@ -11,72 +12,25 @@ public struct MainView: View {
         self._appVM = ObservedObject(wrappedValue: appVM)
     }
 
+    private var palette: GridPalette {
+        let accent = appVM.activeDocEntry.map { AppTheme.color(from: $0.doc.style.accent) } ?? .accentColor
+        return GridPalette.resolve(dark: colorScheme == .dark, accent: accent)
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             // Top Navigation Bar
             topBarView
 
-            // Main Content Area (Grid / Gallery / Start), with the find bar
-            // floating over the top-right corner like a browser's find.
-            ZStack {
-                if appVM.activeDocEntry != nil {
-                    if appVM.isGalleryView {
-                        GalleryView(appVM: appVM)
-                    } else if let activeTableVM {
-                        VirtualizedGridView(appVM: appVM, tableVM: activeTableVM)
-                    } else {
-                        ProgressView("Loading schema…")
-                    }
-                } else {
-                    StartPageView(appVM: appVM)
-                }
-
-                // Drop Overlay
-                if appVM.isDropTargeted {
-                    ZStack {
-                        Color.black.opacity(0.4)
-                        VStack(spacing: 12) {
-                            Image(systemName: "arrow.down.doc.fill")
-                                .font(.system(size: 48))
-                                .foregroundColor(.white)
-                            Text("Drop SQLite Database to Open")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.white)
-                        }
-                        .padding(32)
-                        .background(Color.accentColor.opacity(0.9))
-                        .cornerRadius(16)
-                    }
-                    .transition(.opacity)
-                }
-
-                // Busy Progress Overlay
-                if appVM.isBusy {
-                    BusyOverlayView(
-                        title: appVM.busyTitle,
-                        message: appVM.busyMessage,
-                        progress: appVM.busyProgress,
-                        onCancel: appVM.cancelBusyAction
-                    )
-                    .transition(.opacity)
-                }
+            if let activeTableVM, appVM.showFilterBar, !appVM.isGalleryView {
+                FilterBarView(tableVM: activeTableVM, palette: palette)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay(alignment: .topTrailing) {
-                if appVM.isFindBarVisible, let activeTableVM {
-                    FindBarView(tableVM: activeTableVM) {
-                        withAnimation(.easeOut(duration: 0.12)) {
-                            appVM.isFindBarVisible = false
-                            activeTableVM.cancelFind()
-                        }
-                    }
-                    .padding(.top, 8)
-                    .padding(.trailing, 14)
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .move(edge: .top)),
-                        removal: .opacity
-                    ))
+
+            HStack(spacing: 0) {
+                if appVM.showSidebar, appVM.activeDocEntry != nil {
+                    TableSidebarView(appVM: appVM, palette: palette)
                 }
+                contentArea
             }
 
             // Status Bar
@@ -90,11 +44,28 @@ public struct MainView: View {
         .onChange(of: appVM.selectedTableName) { _, _ in syncActiveTableVM() }
         .onChange(of: appVM.activeDocEntry?.id) { _, _ in syncActiveTableVM() }
         .sheet(item: $appVM.inspectingCell) { info in
-            DataInspectorView(info: info) {
-                appVM.inspectingCell = nil
+            DataInspectorView(info: info) { appVM.inspectingCell = nil }
+                .padding()
+                .frame(minWidth: 540, minHeight: 400)
+        }
+        .sheet(isPresented: $appVM.showSchemaSheet) {
+            if let entry = appVM.activeDocEntry, !appVM.selectedTableName.isEmpty {
+                SchemaSheetView(doc: entry.doc, tableName: appVM.selectedTableName) {
+                    appVM.showSchemaSheet = false
+                }
             }
-            .padding()
-            .frame(minWidth: 540, minHeight: 400)
+        }
+        .sheet(isPresented: $appVM.showQueryConsole) {
+            if let entry = appVM.activeDocEntry {
+                QueryConsoleView(doc: entry.doc, seedTable: appVM.selectedTableName) {
+                    appVM.showQueryConsole = false
+                }
+            }
+        }
+        .sheet(isPresented: $appVM.showJumpToRow) {
+            if let activeTableVM {
+                JumpToRowView(tableVM: activeTableVM) { appVM.showJumpToRow = false }
+            }
         }
         .onDrop(of: [.fileURL, .data], isTargeted: $appVM.isDropTargeted) { providers in
             handleDrop(providers: providers)
@@ -108,6 +79,68 @@ public struct MainView: View {
             Text(appVM.errorMessage ?? "")
         }
     }
+
+    private var contentArea: some View {
+        ZStack {
+            ZStack {
+                if appVM.activeDocEntry != nil {
+                    if appVM.isGalleryView {
+                        GalleryView(appVM: appVM)
+                    } else if let activeTableVM {
+                        VirtualizedGridView(appVM: appVM, tableVM: activeTableVM)
+                    } else {
+                        ProgressView("Loading schema…")
+                    }
+                } else {
+                    StartPageView(appVM: appVM)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if appVM.isDropTargeted {
+                ZStack {
+                    Color.black.opacity(0.4)
+                    VStack(spacing: 12) {
+                        Image(systemName: "arrow.down.doc.fill")
+                            .font(.system(size: 48)).foregroundColor(.white)
+                        Text("Drop a file to open")
+                            .font(.system(size: 18, weight: .bold)).foregroundColor(.white)
+                    }
+                    .padding(32)
+                    .background(Color.accentColor.opacity(0.9))
+                    .cornerRadius(16)
+                }
+                .transition(.opacity)
+            }
+
+            if appVM.isBusy {
+                BusyOverlayView(
+                    title: appVM.busyTitle,
+                    message: appVM.busyMessage,
+                    progress: appVM.busyProgress,
+                    onCancel: appVM.cancelBusyAction
+                )
+                .transition(.opacity)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if appVM.isFindBarVisible, let activeTableVM {
+                FindBarView(tableVM: activeTableVM) {
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        appVM.isFindBarVisible = false
+                        activeTableVM.cancelFind()
+                    }
+                }
+                .padding(.top, 8)
+                .padding(.trailing, 14)
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .top)),
+                    removal: .opacity
+                ))
+            }
+        }
+    }
+
 
     /// Resolves the table view-model for the current doc + table selection.
     /// Runs from lifecycle callbacks, never during `body` evaluation, and evicts
@@ -181,6 +214,14 @@ public struct MainView: View {
 
             // Table Selector
             if let entry = appVM.activeDocEntry {
+                Button(action: { appVM.showSidebar.toggle() }) {
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(appVM.showSidebar ? .accentColor : .primary)
+                }
+                .buttonStyle(.plain)
+                .help("Toggle table sidebar (⌥⌘S)")
+
                 let tables = entry.doc.tables.filter { !$0.hidden }
                 Picker("", selection: $appVM.selectedTableName) {
                     ForEach(tables) { table in
@@ -188,7 +229,7 @@ public struct MainView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .frame(maxWidth: 220)
+                .frame(maxWidth: 200)
 
                 // Gallery Button
                 Button(action: { appVM.isGalleryView.toggle() }) {
@@ -198,6 +239,36 @@ public struct MainView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Toggle multi-table gallery overview (⌘G)")
+
+                Button(action: { appVM.showSchemaSheet = true }) {
+                    Image(systemName: "list.bullet.rectangle.portrait").font(.system(size: 13, weight: .medium))
+                }
+                .buttonStyle(.plain).disabled(appVM.selectedTableName.isEmpty)
+                .help("Table schema (⌘I)")
+
+                Button(action: { appVM.showQueryConsole = true }) {
+                    Image(systemName: "terminal").font(.system(size: 13, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .help("Query console (⌘⇧K)")
+
+                if let vm = activeTableVM {
+                    Button(action: { appVM.showFilterBar.toggle() }) {
+                        Image(systemName: vm.filters.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(appVM.showFilterBar || !vm.filters.isEmpty ? .accentColor : .primary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Filter columns (⌘⌥F)")
+
+                    Button(action: { vm.togglePowerSample() }) {
+                        Image(systemName: "chart.bar.doc.horizontal")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(vm.powerSampleMode ? .accentColor : .primary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Power-2 sample: rows at 1, 2, 4, 8, 16…")
+                }
 
                 Spacer()
 
@@ -247,13 +318,19 @@ public struct MainView: View {
                 .menuStyle(.borderlessButton)
                 .help("Change Theme")
 
-                // CSV Export Button
-                Button(action: { appVM.exportCurrentTable() }) {
-                    Image(systemName: "arrow.down.to.line")
-                        .font(.system(size: 13, weight: .medium))
+                // Export Menu
+                Menu {
+                    ForEach(ExportFormat.allCases, id: \.self) { fmt in
+                        Button("Export as \(fmt.label)…") { appVM.exportCurrentTable(as: fmt) }
+                    }
+                } label: {
+                    Image(systemName: "arrow.down.to.line").font(.system(size: 13, weight: .medium))
+                } primaryAction: {
+                    appVM.exportCurrentTable(as: .csv)
                 }
-                .buttonStyle(.plain)
-                .help("Export this table as CSV (⌘E)")
+                .menuStyle(.borderlessButton)
+                .frame(width: 30)
+                .help("Export this table (⌘E for CSV)")
             } else {
                 Spacer()
 

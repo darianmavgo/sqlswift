@@ -196,19 +196,22 @@ public struct DataInspectorView: View {
     }
 
     // MARK: - BLOB Inspector
+    @State private var blobBytes: Data?
+    @State private var blobLoading = false
+
     private func blobInspectorView(byteCount: Int) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "square.stack.3d.down.right.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(.accentColor)
-
+                    .font(.system(size: 24)).foregroundColor(.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("BLOB Binary Data")
-                        .font(.system(size: 14, weight: .semibold))
+                    Text(blobKindLabel).font(.system(size: 14, weight: .semibold))
                     Text("\(byteCount) bytes (\(formatBytes(byteCount)))")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 11)).foregroundColor(.secondary)
+                }
+                Spacer()
+                if info.loadBlob != nil {
+                    Button("Save…") { saveBlob() }.disabled(blobLoading)
                 }
             }
             .padding(12)
@@ -216,10 +219,65 @@ public struct DataInspectorView: View {
             .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
             .cornerRadius(6)
 
-            Text("Binary objects can be inspected or exported from the main table.")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
+            if let img = blobImage {
+                Image(nsImage: img).resizable().scaledToFit()
+                    .frame(maxHeight: 260)
+                    .cornerRadius(6)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(NSColor.separatorColor), lineWidth: 1))
+            } else if let hex = blobHex {
+                Text(hex)
+                    .font(.system(size: 10, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                    .cornerRadius(6)
+            } else if info.loadBlob != nil {
+                Button(blobLoading ? "Loading…" : "Preview bytes") { loadBlob() }
+                    .disabled(blobLoading)
+            } else {
+                Text("Open this from the grid to preview or save the bytes.")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+            }
         }
+    }
+
+    private var blobKindLabel: String {
+        if blobImage != nil { return "Image" }
+        return "BLOB Binary Data"
+    }
+
+    private var blobImage: NSImage? {
+        guard let d = blobBytes, let img = NSImage(data: d) else { return nil }
+        return img
+    }
+
+    private var blobHex: String? {
+        guard let d = blobBytes else { return nil }
+        let slice = d.prefix(512)
+        var out = ""
+        for (i, byte) in slice.enumerated() {
+            if i % 16 == 0 { out += String(format: "\n%08x  ", i) }
+            out += String(format: "%02x ", byte)
+        }
+        if d.count > 512 { out += "\n… (\(d.count - 512) more bytes)" }
+        return out.trimmingCharacters(in: .newlines)
+    }
+
+    private func loadBlob() {
+        guard let load = info.loadBlob else { return }
+        blobLoading = true
+        blobBytes = load()          // rowid-keyed single-row fetch — fast
+        blobLoading = false
+    }
+
+    private func saveBlob() {
+        guard let load = info.loadBlob else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(info.colName)_row\(info.rowOrdinal).bin"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if blobBytes == nil { blobBytes = load() }
+        try? blobBytes?.write(to: url)
     }
 
     // MARK: - NULL Inspector
