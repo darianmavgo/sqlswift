@@ -78,6 +78,17 @@ public struct FindBarView: View {
                 .fixedSize()
                 .help("Limit the search to one column")
 
+                Button {
+                    tableVM.searchCaseSensitive.toggle()
+                    tableVM.startFind(query: tableVM.searchQuery)
+                } label: {
+                    Text("Aa").font(.system(size: 11, weight: .bold))
+                        .frame(width: 22, height: 22).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(tableVM.searchCaseSensitive ? .accentColor : .secondary)
+                .help("Case-sensitive")
+
                 Text(countText)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.secondary)

@@ -116,6 +116,10 @@ func runAllTests() async {
         let scopedLevel = try doc.find(table: "logs", query: "INFO", column: "level")
         expectEqual(scopedLevel.matches.count, 2)
         expectEqual(scopedLevel.matches[0].column, 1) // columns: id(0), level(1), msg(2)
+
+        // Case-sensitive: "info" (lowercase) matches nothing; "INFO" matches 2.
+        expectEqual(try doc.find(table: "logs", query: "info", caseSensitive: true).matches.count, 0)
+        expectEqual(try doc.find(table: "logs", query: "INFO", caseSensitive: true).matches.count, 2)
     }
 
     // Keyset Paging Tests

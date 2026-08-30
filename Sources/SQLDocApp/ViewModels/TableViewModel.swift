@@ -28,6 +28,7 @@ public final class TableViewModel: ObservableObject {
     @Published public var searchQuery: String = ""
     /// nil = search every column.
     @Published public var searchColumn: String? = nil
+    @Published public var searchCaseSensitive: Bool = false
     @Published public var matches: [FindMatch] = []
     @Published public var activeMatchIndex: Int = -1
     @Published public var activeMatchRowID: Int64? = nil
@@ -204,15 +205,14 @@ public final class TableViewModel: ObservableObject {
     }
 
     public func previousPage() {
-        let step: Int64 = 100
-        loadPage(offset: max(0, currentOffset - step))
+        loadPage(offset: max(0, currentOffset - Int64(pageLimit)))
     }
 
     public func loadLastPage() {
         if powerSampleMode { return }
         let total = !filters.isEmpty ? filteredCount : (tableCount.known ? tableCount.rows : nil)
         if let total, total > 0 {
-            loadPage(offset: max(0, total - 100))
+            loadPage(offset: max(0, total - Int64(pageLimit)))
         } else {
             nextPage()
         }
@@ -268,8 +268,9 @@ public final class TableViewModel: ObservableObject {
     @Published public var selectRowRequest: Int? = nil
     public func jumpToOrdinal(_ n: Int64) {
         let target = max(0, n - 1)
-        let pageOffset = (target / 100) * 100
-        let indexOnPage = Int(target % 100)
+        let lim = Int64(pageLimit)
+        let pageOffset = (target / lim) * lim
+        let indexOnPage = Int(target % lim)
         if currentOffset == pageOffset, let page = currentPage, indexOnPage < page.rows.count {
             selectRowRequest = indexOnPage           // already here
         } else {
@@ -535,6 +536,7 @@ public final class TableViewModel: ObservableObject {
         let table = tableName
         let cap = Self.matchCap
         let scope = searchColumn
+        let caseSensitive = searchCaseSensitive
 
         findTask = Task.detached(priority: .userInitiated) { [weak self] in
             // Debounce: absorb a burst of keystrokes before touching the database.
@@ -545,7 +547,7 @@ public final class TableViewModel: ObservableObject {
             var done = false
 
             while !done && !Task.isCancelled {
-                guard let res = try? docRef.find(table: table, query: trimmed, from: cursor, limit: 50, column: scope) else { break }
+                guard let res = try? docRef.find(table: table, query: trimmed, from: cursor, limit: 50, column: scope, caseSensitive: caseSensitive) else { break }
                 cursor = res.next
                 done = res.done
 
@@ -604,16 +606,17 @@ public final class TableViewModel: ObservableObject {
     /// 100-row page) and done only on page/query change, so the grid body never
     /// runs a substring scan while scrolling.
     func rebuildHighlightMask() {
-        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, let page = currentPage else {
             if !highlightMask.isEmpty { highlightMask = [] }
             return
         }
+        let opts: String.CompareOptions = searchCaseSensitive ? [] : .caseInsensitive
         let scopeIdx = searchColumn.flatMap { name in columns.firstIndex(where: { $0.name == name }) }
         highlightMask = page.text.map { row in
             row.enumerated().map { colIdx, cell in
                 if let scopeIdx, scopeIdx != colIdx { return false }
-                return cell.text.range(of: q, options: .caseInsensitive) != nil
+                return cell.text.range(of: q, options: opts) != nil
             }
         }
     }

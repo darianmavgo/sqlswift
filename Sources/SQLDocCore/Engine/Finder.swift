@@ -10,7 +10,7 @@ extension Doc {
 
     /// Searches a table for a substring, case-insensitively, resuming from a rowid
     /// cursor. Pass `column` to restrict the scan (and the highlight) to one column.
-    public func find(table tableName: String, query q: String, from fromRowID: Int64 = 0, limit: Int = 50, column: String? = nil) throws -> FindResult {
+    public func find(table tableName: String, query q: String, from fromRowID: Int64 = 0, limit: Int = 50, column: String? = nil, caseSensitive: Bool = false) throws -> FindResult {
         let startTime = DispatchTime.now()
 
         guard let t = table(named: tableName), !q.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -43,7 +43,8 @@ extension Doc {
                 limit: cleanLimit,
                 baseArgs: [],
                 searchNeedle: q,
-                columnOffset: columnOffset
+                columnOffset: columnOffset,
+                caseSensitive: caseSensitive
             )
             let elapsed = DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds
             return FindResult(
@@ -84,7 +85,8 @@ extension Doc {
             limit: cleanLimit,
             baseArgs: baseArgs,
             searchNeedle: q,
-            columnOffset: columnOffset
+            columnOffset: columnOffset,
+            caseSensitive: caseSensitive
         )
 
         let span = hi - lo + 1
@@ -114,7 +116,8 @@ extension Doc {
         limit: Int,
         baseArgs: [Any],
         searchNeedle: String,
-        columnOffset: Int
+        columnOffset: Int,
+        caseSensitive: Bool
     ) throws -> [FindMatch] {
         var query = "SELECT rowid, \(colExpr) FROM \(ts.quoted) WHERE \(whereClause)("
         var args = baseArgs
@@ -122,22 +125,29 @@ extension Doc {
 
         for (i, c) in cols.enumerated() {
             if i > 0 { query += " OR " }
-            query += "CAST(\(Doc.quoteIdent(c.name)) AS TEXT) LIKE ? ESCAPE '\\'"
-            args.append(pattern)
+            if caseSensitive {
+                // instr() is a binary, case-sensitive substring test.
+                query += "instr(CAST(\(Doc.quoteIdent(c.name)) AS TEXT), ?) > 0"
+                args.append(searchNeedle)
+            } else {
+                query += "CAST(\(Doc.quoteIdent(c.name)) AS TEXT) LIKE ? ESCAPE '\\'"
+                args.append(pattern)
+            }
         }
         query += ") ORDER BY rowid LIMIT ?"
         args.append(limit)
 
         let rawRows = try bg.query(query, args: args)
         var matches: [FindMatch] = []
-        let lowerNeedle = searchNeedle.lowercased()
+        let needleCmp = caseSensitive ? searchNeedle : searchNeedle.lowercased()
 
         for row in rawRows {
             guard let first = row.first, let rowID = first.intValue else { continue }
             var matchedCol = -1
 
             for (colIdx, cellVal) in row.dropFirst().enumerated() {
-                if let text = cellVal.textValue?.lowercased(), text.contains(lowerNeedle) {
+                let text = caseSensitive ? cellVal.textValue : cellVal.textValue?.lowercased()
+                if let text, text.contains(needleCmp) {
                     matchedCol = columnOffset + colIdx
                     break
                 }

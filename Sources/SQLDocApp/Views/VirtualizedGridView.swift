@@ -172,6 +172,7 @@ public struct VirtualizedGridView: View {
                     smartText: CellFormat.pretty(value: cellVal, kind: entry.fmt),
                     showHighlight: tableVM.cellMatches(row: index, col: c),
                     highlightQuery: tableVM.searchQuery,
+                    highlightCaseSensitive: tableVM.searchCaseSensitive,
                     isSelected: isCellSelected,
                     isActiveMatch: isActiveMatchCell
                 )
@@ -426,6 +427,7 @@ public struct CellView: View {
     var smartText: String? = nil
     let showHighlight: Bool
     let highlightQuery: String
+    var highlightCaseSensitive: Bool = false
     let isSelected: Bool
     let isActiveMatch: Bool
 
@@ -497,7 +499,8 @@ public struct CellView: View {
     private func highlighted(_ text: String, query: String) -> AttributedString {
         var attributed = AttributedString(text)
         var searchRange = text.startIndex..<text.endIndex
-        while let range = text.range(of: query, options: .caseInsensitive, range: searchRange) {
+        let opts: String.CompareOptions = highlightCaseSensitive ? [] : .caseInsensitive
+        while let range = text.range(of: query, options: opts, range: searchRange) {
             if let attrRange = Range(range, in: attributed) {
                 attributed[attrRange].backgroundColor = isActiveMatch
                     ? Color(red: 1.0, green: 0.72, blue: 0.15)
