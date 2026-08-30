@@ -10,7 +10,7 @@ universal binary.
 > Marketing name: **sqldoc** (the app bundle, the CLI, the menu bar).
 > Repository name: **sqlswift** (the Swift rewrite of the original Go `sqldoc`).
 
-![sqldoc 1.1.0 showing the sample telemetry database](docs/screenshots/sqldoc-1.1.0.png)
+![sqldoc 3.1.0 showing the sample telemetry database](docs/screenshots/sqldoc-3.1.0.png)
 
 ---
 
@@ -41,7 +41,7 @@ Design stance:
 
 ### The app (recommended)
 
-1. Download `sqldoc-1.1.0-universal.dmg` from the
+1. Download `sqldoc-3.1.0-universal.dmg` from the
    [latest release](https://github.com/darianmavgo/sqlswift/releases/latest).
 2. Open the DMG and drag **sqldoc** to Applications.
 3. First launch: **right-click the app → Open → Open**. This is needed once
@@ -51,7 +51,7 @@ Design stance:
 ### The CLI
 
 ```sh
-tar xzf sqldoc-cli-1.1.0-macos-universal.tar.gz
+tar xzf sqldoc-cli-3.1.0-macos-universal.tar.gz
 sudo mv sqldoc /usr/local/bin/        # or anywhere on your PATH
 xattr -d com.apple.quarantine /usr/local/bin/sqldoc   # clear the download flag
 sqldoc --version

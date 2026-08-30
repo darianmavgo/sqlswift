@@ -7,7 +7,7 @@ public enum AppIdentity {
     /// PWA manifest background_color — tracks the --ground token
     public static let backgroundColor = "#d6d9dc"
     /// CFBundleVersion / build metadata
-    public static let build = "2"
+    public static let build = "3"
     /// Primary macOS + UTI reverse-DNS prefix
     public static let bundleId = "com.mavgo.sqldoc"
     /// Nested native-window bundle (Go sqldoc-view)
@@ -45,7 +45,7 @@ public enum AppIdentity {
     /// Browser chrome colour (meta theme-color / manifest) — tracks the --toolbar token
     public static let themeColor = "#323639"
     /// Marketing version: CFBundleShortVersionString, `--version`, start-page footer
-    public static let version = "1.1.0"
+    public static let version = "3.1.0"
     /// Start-page footer / `--version` detail line
     public static let versionLineFormat = "{app} {version} · {driver}"
     /// Window / browser-tab title; {document} = _style.title or filename
