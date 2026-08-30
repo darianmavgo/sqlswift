@@ -16,8 +16,8 @@ universal binary.
 
 ## Why it exists
 
-`sqlswift` is the eleventh take on one idea: *look at a SQLite file without
-mutating it, without waiting, and without a heavyweight database GUI*. The ten
+`sqlswift` is the tenth take on one idea: *look at a SQLite file without
+mutating it, without waiting, and without a heavyweight database GUI*. The nine
 prototypes before it — Go + WebView, Go → JS, WASM + Canvas, Wails, Tauri,
 Flutter, Metal — each proved out one piece and hit the same wall from a
 different angle. sqlswift is the version with no server, no webview, no runtime,
@@ -53,8 +53,6 @@ public — they are the reason sqlswift looks the way it does. In rough order:
 | 7 | [**taurisqliter**](https://github.com/darianmavgo/taurisqliter) | Tauri (Rust + React + TypeScript) | Same move as Wails with a Rust shell and the OS webview. Smaller binary — but now it's three languages (Rust, TS, SQL) and the webview still doesn't scroll like a Mac app. |
 | 8 | [**sqliteplutogrid**](https://github.com/darianmavgo/sqliteplutogrid) ("Sqliter") | Flutter + PlutoGrid/TrinaGrid + `macos_ui` + `sqflite_common_ffi` | The closest to native feel before Swift. `macos_ui` gets you most of a Mac look; a real virtualized grid widget is table stakes. **Power-2 sampling** and **smart in-cell formatting** (permission bits, epochs) were born here and went straight into sqlswift. Flight3/Banquet remote sync was scope creep. |
 | 9 | [**metalsqlite**](https://github.com/darianmavgo/metalsqlite) | Swift + a Metal-rendered table + a Go/Banquet HTTP backend | First Swift attempt: draw the grid on the GPU. Metal is overkill for a table of text — `NSTableView` / SwiftUI `List` are already fast enough — and keeping a Go HTTP backend dragged the port/subprocess problems right back in. Its `SWIFT_LEARNING.md` (AppKit toolbars, full-screen-on-launch) fed the real port. |
-| 10 | [**mksqlite**](https://github.com/darianmavgo/mksqlite) + [**mksqlite-web**](https://github.com/darianmavgo/mksqlite-web) | Go / JS | Not viewers — the ingestion side. Any file (PDF, CSV, Excel, HTML, JSON, Markdown, TXT, ZIP, a whole directory tree) → SQLite. sqlswift's "open a non-SQLite file" path is a small in-process version of this. |
-| — | [**runsql**](https://github.com/darianmavgo/runsql) | Go | A tangent: a CLI to run `.sql` files. Documented failure — `database/sql` can't run sqlite3 dot-commands (`.read`, `.import`), and shelling out to `sqlite3` wasn't worth it. Informed why sqlswift's CLI talks to SQLite through the C API directly. |
 
 **The through-line:** every web-tech approach fought macOS — ports, firewall
 prompts, webview scrolling, multi-language builds, fat binaries — and every
