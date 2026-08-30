@@ -142,7 +142,11 @@ public final class TableViewModel: ObservableObject {
 
     // MARK: - Windowed loading (never blocks the main thread)
 
-    public func loadPage(offset: Int64, limit: Int = 100) {
+    /// Rows per page — honours a document's `_head` `page_size`, else 100.
+    public var pageLimit: Int { doc.style.pageSize ?? 100 }
+
+    public func loadPage(offset: Int64, limit: Int? = nil) {
+        let limit = limit ?? pageLimit
         let clampedOffset = max(0, offset)
         self.currentOffset = clampedOffset
         let window = SQLDocCore.Window(
@@ -260,15 +264,21 @@ public final class TableViewModel: ObservableObject {
 
     // MARK: - Jump to row
 
-    /// Scroll so the row at 1-based ordinal `n` is on the current page.
+    /// Scroll so the row at 1-based ordinal `n` is on the current page and select it.
+    @Published public var selectRowRequest: Int? = nil
     public func jumpToOrdinal(_ n: Int64) {
-        let target = max(1, n) - 1
-        loadPage(offset: (target / 100) * 100)
-        appHighlightRow(atPageIndex: Int(target % 100))
+        let target = max(0, n - 1)
+        let pageOffset = (target / 100) * 100
+        let indexOnPage = Int(target % 100)
+        if currentOffset == pageOffset, let page = currentPage, indexOnPage < page.rows.count {
+            selectRowRequest = indexOnPage           // already here
+        } else {
+            pendingSelectRow = indexOnPage
+            loadPage(offset: pageOffset)
+        }
     }
 
     private var pendingSelectRow: Int?
-    private func appHighlightRow(atPageIndex idx: Int) { pendingSelectRow = idx }
     public func consumePendingSelection() -> Int? {
         defer { pendingSelectRow = nil }
         return pendingSelectRow

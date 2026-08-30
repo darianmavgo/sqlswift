@@ -81,8 +81,15 @@ private struct FilterField: View {
         .background(active ? Color.accentColor.opacity(0.14) : Color(NSColor.controlBackgroundColor).opacity(0.6))
         .cornerRadius(4)
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(active ? Color.accentColor.opacity(0.5) : Color(NSColor.separatorColor), lineWidth: 1))
-        .onAppear {
-            if let f = tableVM.filters.first(where: { $0.column == column }) { op = f.op; text = f.value }
+        .onAppear { sync() }
+        .onChange(of: tableVM.filters) { _, _ in sync() }
+    }
+
+    private func sync() {
+        if let f = tableVM.filters.first(where: { $0.column == column }) {
+            op = f.op; text = f.value
+        } else {
+            text = ""
         }
     }
 

@@ -5,13 +5,13 @@ import Foundation
 
 public enum BuildInfo {
     /// Short hash of HEAD when this binary was built.
-    public static let commit = "a54e57755"
+    public static let commit = "320d8f0c1"
     /// Commit date of HEAD (YYYY-MM-DD).
     public static let commitDate = "2026-08-29"
     /// Branch HEAD was on at build time.
     public static let branch = "perf-presentation-overhaul"
     /// True when the working tree had uncommitted changes at build time.
-    public static let dirty = false
+    public static let dirty = true
 
     /// When this executable was actually built, read from its own file date.
     public static let builtAt: Date? = {

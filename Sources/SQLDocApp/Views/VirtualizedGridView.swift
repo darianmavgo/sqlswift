@@ -67,10 +67,18 @@ public struct VirtualizedGridView: View {
         .onChange(of: tableVM.currentPage?.start) { _, _ in
             if let idx = tableVM.consumePendingSelection(),
                let page = tableVM.currentPage, idx < page.rows.count {
-                appVM.selectedRowIndex = idx
-                appVM.selectedCell = (row: idx, col: layout.first?.fullIndex ?? 0)
+                selectRow(idx)
             }
         }
+        .onChange(of: tableVM.selectRowRequest) { _, req in
+            if let idx = req { selectRow(idx); tableVM.selectRowRequest = nil }
+        }
+    }
+
+    private func selectRow(_ idx: Int) {
+        appVM.selectedRowIndex = idx
+        appVM.selectedCell = (row: idx, col: layout.first?.fullIndex ?? 0)
+        isGridFocused = true
     }
 
     private var gridBody: some View {
