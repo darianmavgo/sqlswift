@@ -16,12 +16,12 @@ universal binary.
 
 ## Why it exists
 
-`sqlswift` is the fourth take on one idea: *look at a SQLite file without
-mutating it, without waiting, and without a heavyweight database GUI*. It carries
-the best parts of a lineage of prototypes — a Go + WebView viewer, a
-"render a database to a shareable HTML page" tool, and a Flutter native-grid app —
-into a single native macOS application with no runtime, no embedded browser, and
-no dependency graph.
+`sqlswift` is the eleventh take on one idea: *look at a SQLite file without
+mutating it, without waiting, and without a heavyweight database GUI*. The ten
+prototypes before it — Go + WebView, Go → JS, WASM + Canvas, Wails, Tauri,
+Flutter, Metal — each proved out one piece and hit the same wall from a
+different angle. sqlswift is the version with no server, no webview, no runtime,
+and no dependencies. See [Lineage](#lineage), below.
 
 Design stance:
 
@@ -34,6 +34,32 @@ Design stance:
 - **The document can describe itself.** Optional `_style` / `_head` / `_nav`
   tables let a database carry its own title, accent color, theme, and table
   ordering.
+
+---
+
+## Lineage
+
+I have built a SQLite viewer an embarrassing number of times. Every one is now
+public — they are the reason sqlswift looks the way it does. In rough order:
+
+| # | Project | Stack | What it proved — and what sqlswift took or dropped |
+|---|---|---|---|
+| 1 | [**sqldoc**](https://github.com/darianmavgo/sqldoc) | Go + Cgo + WebKit + a 900-line vanilla-JS virtual grid + localhost HTTP + a nested launcher bundle | The direct predecessor, and the one that hurt. Wrapping a Go/JS web app to act native meant two Cmd-Tab icons, "accept incoming connections?" firewall prompts, a 1-second polling timer to catch Apple Events, and ~80 MB of RAM. Its `RefactorSwift.html` is the feasibility report that became sqlswift. **Kept:** the keyset-paging engine, the `_style`/`_nav` convention, the `info`/`bench` CLI. **Dropped:** HTTP, ports, the subprocess, WebKit. |
+| 2 | [**sqlitewebpage**](https://github.com/darianmavgo/sqlitewebpage) | Go + AG Grid, `RenderDatabase() → one .html` | "Share a database the way you share a web page." A self-contained HTML export is genuinely useful, and a rich `_head`/`_style` engine (favicon, description, author, custom CSS, `page_size`, OpenGraph) is worth carrying. **Kept:** the HTML-export path and the extended `_head` keys. |
+| 3 | [**sqliter**](https://github.com/darianmavgo/sqliter) | Go single binary with an embedded React + AG Grid frontend, full CRUD, Banquet URL deep-linking | The most "product" of the web attempts. AG Grid's infinite-row model really does handle million-row tables; embedding the whole frontend in one Go binary is a clean way to ship. Every-view-state-in-the-URL is clever but overkill for a local file. **Dropped:** CRUD (read-only is the point) and the server. |
+| 4 | [**gopherjssqliter**](https://github.com/darianmavgo/gopherjssqliter) | Go → JavaScript via GopherJS, React UI | Can you reuse the Go engine in the browser by compiling it? Yes — but the toolchain friction and shipping a whole Go runtime to the browser aren't worth it. |
+| 5 | [**wasmcanvas**](https://github.com/darianmavgo/wasmcanvas) | Go/WASM + `modernc.org/sqlite` + HTML5 Canvas 2D | Query 300k+ rows entirely client-side and paint the grid to a `<canvas>` at 60fps. Canvas rendering is fast and CGO-free SQLite-in-WASM works — but you rebuild every affordance (selection, scrollbars, accessibility) from zero. |
+| 6 | [**wailssqliter**](https://github.com/darianmavgo/wailssqliter) | Wails 2 (Go + React) | "No HTTP — use native bindings." That kills the firewall prompt and the port dance, but you still ship a webview and a JS build. |
+| 7 | [**taurisqliter**](https://github.com/darianmavgo/taurisqliter) | Tauri (Rust + React + TypeScript) | Same move as Wails with a Rust shell and the OS webview. Smaller binary — but now it's three languages (Rust, TS, SQL) and the webview still doesn't scroll like a Mac app. |
+| 8 | [**sqliteplutogrid**](https://github.com/darianmavgo/sqliteplutogrid) ("Sqliter") | Flutter + PlutoGrid/TrinaGrid + `macos_ui` + `sqflite_common_ffi` | The closest to native feel before Swift. `macos_ui` gets you most of a Mac look; a real virtualized grid widget is table stakes. **Power-2 sampling** and **smart in-cell formatting** (permission bits, epochs) were born here and went straight into sqlswift. Flight3/Banquet remote sync was scope creep. |
+| 9 | [**metalsqlite**](https://github.com/darianmavgo/metalsqlite) | Swift + a Metal-rendered table + a Go/Banquet HTTP backend | First Swift attempt: draw the grid on the GPU. Metal is overkill for a table of text — `NSTableView` / SwiftUI `List` are already fast enough — and keeping a Go HTTP backend dragged the port/subprocess problems right back in. Its `SWIFT_LEARNING.md` (AppKit toolbars, full-screen-on-launch) fed the real port. |
+| 10 | [**mksqlite**](https://github.com/darianmavgo/mksqlite) + [**mksqlite-web**](https://github.com/darianmavgo/mksqlite-web) | Go / JS | Not viewers — the ingestion side. Any file (PDF, CSV, Excel, HTML, JSON, Markdown, TXT, ZIP, a whole directory tree) → SQLite. sqlswift's "open a non-SQLite file" path is a small in-process version of this. |
+| — | [**runsql**](https://github.com/darianmavgo/runsql) | Go | A tangent: a CLI to run `.sql` files. Documented failure — `database/sql` can't run sqlite3 dot-commands (`.read`, `.import`), and shelling out to `sqlite3` wasn't worth it. Informed why sqlswift's CLI talks to SQLite through the C API directly. |
+
+**The through-line:** every web-tech approach fought macOS — ports, firewall
+prompts, webview scrolling, multi-language builds, fat binaries — and every
+native approach that kept a server kept the problems. sqlswift is the
+conclusion: pure Swift 6, system `libsqlite3`, nothing else.
 
 ---
 
