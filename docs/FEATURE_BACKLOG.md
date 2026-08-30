@@ -30,28 +30,33 @@ tables · `info` and `bench` CLI · immutable open mode.
 
 ---
 
+> **Status (commits `97fea9e`, `284e468`, `1ca240d`):** Tier 1 and Tier 2 are
+> implemented except where noted `[deferred]`. `[deferred]` items need an
+> external library (Excel/PDF) or are larger follow-ups (regex find, column
+> drag-reorder).
+
 ## Tier 1 — you've built or fully specced these more than once
 
-### SQL editor / query console
+### SQL editor / query console  ✅
 A second tab: monospace editor, syntax highlighting, `⌘↵` runs, results render in
 the same grid. Read-only `SELECT` only fits sqlswift's "not an editor" stance.
 *Source: Sqliter `SqlitervsDataflare.md` §3.7 and `CLIENT_DESIGN_DOC.md` §6
 ("Saved Queries"), listed as the top parity gap vs Dataflare every time.*
 
-### Per-column filter bar
+### Per-column filter bar  ✅
 A filter row under the header — one field per column, debounced, issues
 `WHERE "col" LIKE ?` (or `=`, `>`, `<`, `IS NULL`). Distinct from find: find
 locates, filter narrows the result set.
 *Source: Sqliter `SqlitervsDataflare.md` §3.5, `UpdatesFeb20.md`; Dataflare parity.*
 
-### Full schema view
+### Full schema view  ✅
 Column **type, NOT NULL, PK, default**, plus **foreign keys** (`PRAGMA
 foreign_key_list`) and **indexes** (`PRAGMA index_list`), and the raw
 `CREATE TABLE` DDL. Today sqlswift shows column name + type only.
 *Source: sqldoc `schema.go` (partial), Sqliter `SqlitervsDataflare.md` §3.6,
 Dataflare parity. `RefactorSwift.html` lists "Schema View" as a subsystem.*
 
-### Table sidebar (vs the titlebar picker)
+### Table sidebar (vs the titlebar picker)  ✅
 A collapsible left list of tables/views, row counts inline, click to switch.
 sqldoc's JS frontend had this; the Swift port replaced it with a menu picker and
 `FinishPort.html` flags that as an open "structural style deviation."
@@ -67,12 +72,12 @@ through Flight3's `/api/convert`. Natural fit: bundle a converter or shell out t
 *Source: mksqlite README (all formats), Sqliter `ConversionService` /
 `CLIENT_DESIGN_DOC.md` §3.4.*
 
-### Export as a self-contained HTML page
+### Export as a self-contained HTML page  ✅
 "Share the table the way you'd share a web page" — one `.html` file, data inlined,
 styled from the document's own `_head`. This was the entire point of sqlitewebpage.
 *Source: sqlitewebpage `RenderDatabase()`, `render.go`.*
 
-### Richer `_head` / `_style` convention
+### Richer `_head` / `_style` convention  ✅ (favicon/desc/author/font/bg/text/css/page_size parsed; page_size + HTML export wired)
 sqlswift reads `title`, `accent`, `theme`. sqlitewebpage's engine also honours
 `description`, `author`, `favicon`, `og:*`, `twitter:*`, `canonical`,
 `custom_css`, `head_script`, `page_size`, `font_family`, `bg`/`text` colours,
@@ -81,7 +86,7 @@ window/dock, `page_size`, `font_family`, `bg`/`text`) and keeping the rest for
 the HTML-export path.
 *Source: sqlitewebpage `metadata.go` `applyHeadKeyValue`.*
 
-### More export / copy formats
+### More export / copy formats  ✅ CSV/TSV/JSON/SQL/Markdown/HTML · Excel [deferred]
 Beyond CSV: JSON, TSV, SQL `INSERT` dump, **Markdown table** (for pasting into
 GitHub/docs), Excel `.xlsx`. Copy *selection* (not just whole row) in any of these.
 *Source: sqldoc copy-row menu (JSON/TSV/CSV already), mksqlite (SQL dump, MD),
@@ -91,12 +96,12 @@ Sqliter `CsvExportService`.*
 
 ## Tier 2 — designed once, clearly wanted
 
-### Dynamic / resizable row height
+### Dynamic / resizable row height  ✅ (Compact/Regular/Tall + wrap)
 Row height is hardcoded `26 * zoom`. Long text needs an auto-expand mode and/or a
 drag-to-resize row grip.
 *Source: `FinishPort.html` "Dynamic Row Heights" (explicit gap).*
 
-### Smart in-cell formatting
+### Smart in-cell formatting  ✅
 Render Unix permission bits as `rwxr-xr-x`, epoch seconds/millis as local
 date-time, bytes as `1.4 MB` — in the grid, keyed off column name/type, not only
 in the inspector. sqlswift already detects epochs in the inspector; push it into
@@ -104,42 +109,42 @@ the cell.
 *Source: Sqliter `utils/formatters.dart` (`formatPermissions`, epoch), README
 "Smart Formatting".*
 
-### Power2 sampling
+### Power2 sampling  ✅
 One click shows rows at ordinals 1, 2, 4, 8, 16, 32… — a logarithmic spot-check
 of a huge table without scrolling. Sqliter's signature original feature.
 *Source: Sqliter README "Power2 Analysis", `db_service.dart`.*
 
-### Jump-to-row dialog
+### Jump-to-row dialog  ✅ (⌘L)
 `⌘L` → type an ordinal or rowid → scroll there. The scrollbar interpolation
 exists; this is the keyboard entry point.
 *Source: Sqliter `CLIENT_DESIGN_DOC.md` §3.2 "Jump to Row".*
 
-### Find: regex, case-sensitive, whole-cell, FTS5
+### Find: regex, case-sensitive, whole-cell, FTS5  ✅ case-sensitive + column scope · regex/whole-cell/FTS5 [deferred]
 sqldoc's find is substring-only (`CAST(col AS TEXT) LIKE '%q%'`). Add toggles, and
 route through an FTS5 table when the document has one.
 *Source: `RefactorSwift.html` ("Swift SQLite FTS5 / LIKE streaming query"),
 sqldoc `find.go`.*
 
-### Load-progress badge
+### Load-progress badge  ✅
 "Loaded 100 / 12,400 rows" in the status bar while a background job (count,
 sample, find) runs. sqlswift shows the find scan count now; generalize it.
 *Source: Sqliter `SqlitervsDataflare.md` §3.10.*
 
-### Persist sort preference per table
+### Persist sort preference per table  ✅
 Column widths already persist; sort column/direction should too.
 *Source: Sqliter `SqlitervsDataflare.md` §3.9.*
 
-### Blob handling
+### Blob handling  ✅ (image preview, hex dump, Save…)
 sqldoc deliberately never ships blob bytes (web security). A native app can:
 show an image blob as a thumbnail/Quick Look, hex-dump a small blob, "save blob
 as…". 
 *Source: sqldoc README "Safety" (the constraint a native app removes).*
 
-### Column show/hide and reorder
+### Column show/hide and reorder  ✅ show/hide + persist · drag-reorder [deferred]
 Hide noisy columns, drag to reorder. Persist alongside widths.
 *Source: general viewer parity (Dataflare); implied by Sqliter `_optimizeColumns`.*
 
-### Error dialogs, never silent failures
+### Error dialogs, never silent failures  ✅ (export/import/query surfaced)
 Sqliter's #1 hard-won lesson: a bad path / bad table name / missing column list
 produced a black screen. Every failure path needs a visible `MacosAlertDialog`
 equivalent. sqlswift has an error `.alert` for open failures — extend it to
