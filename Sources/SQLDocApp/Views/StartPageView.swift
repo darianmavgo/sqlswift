@@ -113,6 +113,12 @@ public struct StartPageView: View {
             }
 
             Spacer()
+
+            Text(BuildInfo.summary)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary.opacity(0.7))
+                .textSelection(.enabled)
+                .help(BuildInfo.detail)
         }
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

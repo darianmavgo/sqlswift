@@ -37,6 +37,21 @@ struct SQLDocApp: App {
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: true))
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About \(AppIdentity.displayName)") {
+                    NSApplication.shared.orderFrontStandardAboutPanel(options: [
+                        .applicationName: AppIdentity.displayName,
+                        .applicationVersion: AppIdentity.version,
+                        .version: "\(BuildInfo.commit)\(BuildInfo.dirty ? " (modified)" : "")",
+                        .init(rawValue: "Copyright"): AppIdentity.copyright,
+                        .credits: NSAttributedString(
+                            string: "\(AppIdentity.tagline)\n\n\(BuildInfo.detail)",
+                            attributes: [.font: NSFont.systemFont(ofSize: 10)]
+                        )
+                    ])
+                }
+            }
+
             CommandGroup(replacing: .newItem) {
                 Button("Open Database…") {
                     appVM.showOpenPanel()

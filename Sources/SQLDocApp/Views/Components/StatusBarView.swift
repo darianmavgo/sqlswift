@@ -51,6 +51,13 @@ public struct StatusBarView: View {
                 }
                 .layoutPriority(-1)
             }
+
+            Divider().frame(height: 12)
+
+            Text("\(AppIdentity.version)·\(BuildInfo.commit)\(BuildInfo.dirty ? "+" : "")")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary.opacity(0.75))
+                .help("Build: \(BuildInfo.detail)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
