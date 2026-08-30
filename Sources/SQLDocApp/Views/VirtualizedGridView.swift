@@ -53,10 +53,16 @@ public struct VirtualizedGridView: View {
                 gridBody
             }
         }
-        .focusable()
+        .focusable(!appVM.isFindBarVisible)
         .focused($isGridFocused)
-        .onKeyPress { handleKeyPress($0) }
-        .onAppear { isGridFocused = true }
+        .onKeyPress { press in
+            // The find field owns the keyboard while it's open.
+            appVM.isFindBarVisible ? .ignored : handleKeyPress(press)
+        }
+        .onAppear { isGridFocused = !appVM.isFindBarVisible }
+        .onChange(of: appVM.isFindBarVisible) { _, visible in
+            isGridFocused = !visible
+        }
     }
 
     private var gridBody: some View {

@@ -21,7 +21,12 @@ public struct FindBarView: View {
             .clipShape(RoundedRectangle(cornerRadius: DesignToken.radiusPanel))
             .shadow(color: Color.black.opacity(0.22), radius: 12, x: 0, y: 6)
             .fixedSize()
-            .onAppear { isFieldFocused = true }
+            .task {
+                // The field isn't in the window's responder chain during onAppear
+                // (it's mid insertion-transition), so focus has to be deferred.
+                try? await Task.sleep(nanoseconds: 40_000_000)
+                isFieldFocused = true
+            }
     }
 
     private var content: some View {
@@ -40,6 +45,8 @@ public struct FindBarView: View {
                         tableVM.startFind(query: newValue)
                     }
                     .onSubmit { tableVM.nextMatch() }
+                    .onKeyPress(.escape) { onClose(); return .handled }
+                    .onExitCommand { onClose() }
 
                 // Column scope
                 Menu {
