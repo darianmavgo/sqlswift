@@ -65,6 +65,7 @@ public final class AppViewModel: ObservableObject {
     @Published public var isBanquetBarEditing: Bool = false
     @Published public var banquetBarText: String = ""
     @Published public var banquetCopiedFeedback: Bool = false
+    @Published public var pendingBanquet: Banquet? = nil
 
     public let session = SessionManager.shared
     public let recents = RecentsManager.shared
@@ -391,6 +392,8 @@ public final class AppViewModel: ObservableObject {
 
     /// Applies a parsed `Banquet` query onto the application state.
     public func applyBanquet(_ b: Banquet, activeTableVM: TableViewModel? = nil) {
+        self.pendingBanquet = b
+
         // 1. Open or select dataset if specified
         if !b.dataSetPath.isEmpty {
             let path = (b.dataSetPath as NSString).expandingTildeInPath
@@ -409,13 +412,17 @@ public final class AppViewModel: ObservableObject {
         // 2. Select table if specified
         if !b.table.isEmpty, let entry = activeDocEntry {
             if entry.doc.tables.contains(where: { $0.name == b.table }) {
-                self.selectedTableName = b.table
+                if self.selectedTableName != b.table {
+                    self.selectedTableName = b.table
+                }
             }
         }
 
-        // 3. Apply sort and slice clauses onto the table view model
-        if let vm = activeTableVM {
+        // 3. Apply sort, filters, columns, slice clauses onto the table view model
+        let targetTable = b.table.isEmpty ? selectedTableName : b.table
+        if let vm = activeTableVM, vm.tableName == targetTable {
             vm.applyBanquet(b)
+            self.pendingBanquet = nil
         }
     }
 }
