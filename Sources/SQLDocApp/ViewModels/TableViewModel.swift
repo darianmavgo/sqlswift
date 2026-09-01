@@ -378,6 +378,21 @@ public final class TableViewModel: ObservableObject {
             column: sortColumn, desc: isSortDesc, numeric: sortNumeric)
     }
 
+    // MARK: - Banquet Integration
+
+    /// Applies query parameters, sort, and slice offset from a parsed Banquet object.
+    public func applyBanquet(_ banquet: Banquet) {
+        if let sortCol = banquet.sortColumn, !sortCol.isEmpty {
+            setSort(column: sortCol, desc: banquet.isSortDesc)
+        }
+
+        if let offset = banquet.offset {
+            loadPage(offset: Int64(offset))
+        } else {
+            loadPage(offset: 0)
+        }
+    }
+
     // MARK: - Column widths
 
     public func updateWidth(column: String, width: CGFloat) {

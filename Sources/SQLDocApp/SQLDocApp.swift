@@ -12,7 +12,11 @@ struct SQLDocApp: App {
             MainView(appVM: appVM)
                 .frame(minWidth: 700, minHeight: 450)
                 .onOpenURL { url in
-                    appVM.open(url: url)
+                    if url.scheme == "banquet" || url.scheme == "x-banquet" {
+                        appVM.openBanquet(urlString: url.absoluteString)
+                    } else {
+                        appVM.open(url: url)
+                    }
                 }
                 .onAppear {
                     // Maximize window to fill screen on launch (matching fillScreen behavior)
@@ -79,9 +83,20 @@ struct SQLDocApp: App {
                     appVM.pasteFromClipboard()
                 }
                 .keyboardShortcut("v", modifiers: .command)
+
+                Button("Copy Banquet URL") {
+                    appVM.copyBanquetURL(for: nil)
+                }
+                .keyboardShortcut("c", modifiers: [.command, .option])
+                .disabled(appVM.activeDocEntry == nil)
             }
 
             CommandGroup(after: .textEditing) {
+                Button("Focus Address Bar") {
+                    appVM.isBanquetBarEditing = true
+                }
+                .keyboardShortcut("l", modifiers: [.command, .option])
+
                 Button("Find in Table…") {
                     appVM.isFindBarVisible.toggle()
                 }

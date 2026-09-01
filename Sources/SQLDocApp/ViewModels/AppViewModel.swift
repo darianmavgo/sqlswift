@@ -61,6 +61,11 @@ public final class AppViewModel: ObservableObject {
     @Published public var selectedCell: (row: Int, col: Int)? = nil
     @Published public var selectedRowIndex: Int? = nil
 
+    // Banquet Bar state
+    @Published public var isBanquetBarEditing: Bool = false
+    @Published public var banquetBarText: String = ""
+    @Published public var banquetCopiedFeedback: Bool = false
+
     public let session = SessionManager.shared
     public let recents = RecentsManager.shared
     public let persistence = StatePersistenceManager.shared
@@ -289,4 +294,129 @@ public final class AppViewModel: ObservableObject {
         zoomScale = BehaviorConfig.zoomDefault
         persistence.zoomScale = zoomScale
     }
+
+    // MARK: - Banquet Integration
+
+    /// Composes a `Banquet` model from current document, table selection, and table view model state.
+    public func banquet(for tableVM: TableViewModel?) -> Banquet {
+        guard let entry = activeDocEntry else {
+            return Banquet()
+        }
+
+        let dataset = entry.doc.path
+        let table = selectedTableName
+        let sortCol = tableVM?.sortColumn
+        let isSortDesc = tableVM?.isSortDesc ?? false
+        let filters = tableVM?.filters
+        let offset = tableVM?.currentOffset
+        let limit = tableVM?.pageLimit
+
+        // Build where clause from filters
+        let whereClause: String?
+        if let filters, !filters.isEmpty {
+            let clauses = filters.compactMap { filter -> String? in
+                let val = filter.value.trimmingCharacters(in: .whitespacesAndNewlines)
+                let col = filter.column
+                switch filter.op {
+                case .equals:
+                    return "\(col) = '\(val.replacingOccurrences(of: "'", with: "''"))'"
+                case .notEquals:
+                    return "\(col) != '\(val.replacingOccurrences(of: "'", with: "''"))'"
+                case .contains:
+                    return "\(col) LIKE '%\(val)%'"
+                case .startsWith:
+                    return "\(col) LIKE '\(val)%'"
+                case .greater:
+                    return "\(col) > \(val)"
+                case .less:
+                    return "\(col) < \(val)"
+                case .isNull:
+                    return "\(col) IS NULL"
+                case .isNotNull:
+                    return "\(col) IS NOT NULL"
+                }
+            }
+            whereClause = clauses.isEmpty ? nil : clauses.joined(separator: " AND ")
+        } else {
+            whereClause = nil
+        }
+
+        return Banquet(
+            dataSetPath: dataset,
+            table: table,
+            select: ["*"],
+            sortColumn: sortCol,
+            isSortDesc: isSortDesc,
+            whereClause: whereClause,
+            limit: limit,
+            offset: offset.map { Int($0) }
+        )
+    }
+
+    /// Returns the canonical Banquet URL string for the current view.
+    public func banquetURLString(for tableVM: TableViewModel?) -> String {
+        let b = banquet(for: tableVM)
+        return BanquetSerializer.canonicalString(for: b)
+    }
+
+    /// Copies the canonical Banquet URL for the active table to the pasteboard.
+    public func copyBanquetURL(for tableVM: TableViewModel?) {
+        let urlStr = banquetURLString(for: tableVM)
+        guard !urlStr.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(urlStr, forType: .string)
+
+        banquetCopiedFeedback = true
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            await MainActor.run { [weak self] in
+                self?.banquetCopiedFeedback = false
+            }
+        }
+    }
+
+    /// Navigates to a Banquet URL: resolves dataset path, table, sort, and filters.
+    public func openBanquet(urlString: String, activeTableVM: TableViewModel? = nil) {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        do {
+            let b = try BanquetParser.parse(trimmed)
+            applyBanquet(b, activeTableVM: activeTableVM)
+        } catch {
+            errorMessage = "Failed to parse Banquet URL: \(error.localizedDescription)"
+        }
+    }
+
+    /// Applies a parsed `Banquet` query onto the application state.
+    public func applyBanquet(_ b: Banquet, activeTableVM: TableViewModel? = nil) {
+        // 1. Open or select dataset if specified
+        if !b.dataSetPath.isEmpty {
+            let path = (b.dataSetPath as NSString).expandingTildeInPath
+            if let current = activeDocEntry, current.doc.path == path || (current.doc.path as NSString).lastPathComponent == b.dataSetPath {
+                // Dataset matches current open doc
+            } else if let existing = openDocuments.first(where: { $0.doc.path == path || ($0.doc.path as NSString).lastPathComponent == b.dataSetPath }) {
+                setActiveDocument(existing)
+            } else if FileManager.default.fileExists(atPath: path) {
+                open(path: path)
+            } else {
+                errorMessage = "Cannot find database file at '\(b.dataSetPath)'"
+                return
+            }
+        }
+
+        // 2. Select table if specified
+        if !b.table.isEmpty, let entry = activeDocEntry {
+            if entry.doc.tables.contains(where: { $0.name == b.table }) {
+                self.selectedTableName = b.table
+            }
+        }
+
+        // 3. Apply sort and slice clauses onto the table view model
+        if let vm = activeTableVM {
+            vm.applyBanquet(b)
+        }
+    }
 }
+

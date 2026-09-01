@@ -370,6 +370,87 @@ func runAllTests() async {
         expectEqual(manager.themeMode, .dark)
     }
 
+    // Banquet URL Parsing & Serialization Tests
+    await test("Banquet: Explicit semicolon parsing") {
+        let b1 = try BanquetParser.parse("data/sales.sqlite;orders;amount")
+        expectEqual(b1.dataSetPath, "data/sales.sqlite")
+        expectEqual(b1.table, "orders")
+        expectEqual(b1.select, ["amount"])
+
+        let b2 = try BanquetParser.parse("database.sqlite;customers;id,name,+age?where=age>18&limit=50")
+        expectEqual(b2.dataSetPath, "database.sqlite")
+        expectEqual(b2.table, "customers")
+        expectEqual(b2.select, ["id", "name"])
+        expectEqual(b2.sortColumn, "age")
+        expectEqual(b2.isSortDesc, false)
+        expectEqual(b2.whereClause, "age>18")
+        expectEqual(b2.limit, 50)
+    }
+
+    await test("Banquet: Familiar slash-delimited parsing & slice notation") {
+        let b = try BanquetParser.parse("history.db/backtest_details_all/-Open[10:35]")
+        expectEqual(b.dataSetPath, "history.db")
+        expectEqual(b.table, "backtest_details_all")
+        expectEqual(b.sortColumn, "Open")
+        expectEqual(b.isSortDesc, true)
+        expectEqual(b.offset, 10)
+        expectEqual(b.limit, 25)
+
+        let bCsv = try BanquetParser.parse("sample.csv/Name,City")
+        expectEqual(bCsv.dataSetPath, "sample.csv")
+        expectEqual(bCsv.select, ["Name", "City"])
+
+        let bFilter = try BanquetParser.parse("users.sqlite/members/status!=active")
+        expectEqual(bFilter.dataSetPath, "users.sqlite")
+        expectEqual(bFilter.table, "members")
+        expectEqual(bFilter.whereClause, "status != 'active'")
+    }
+
+    await test("Banquet: Canonical serialization and breadcrumbs") {
+        let b = Banquet(
+            dataSetPath: "history.db",
+            table: "orders",
+            select: ["id", "total"],
+            sortColumn: "total",
+            isSortDesc: true,
+            whereClause: "status = 'active'",
+            limit: 25,
+            offset: 50
+        )
+
+        let canonical = BanquetSerializer.canonicalString(for: b)
+        expectTrue(canonical.contains("history.db/orders/-total,id,total[50:75]"))
+        expectTrue(canonical.contains("where=status%20=%20'active'") || canonical.contains("where=status = 'active'"))
+
+        // Breadcrumb segments
+        let segments = b.segments()
+        expectEqual(segments.count, 6) // dataset, table, columns, filter, sort, slice
+        expectEqual(segments[0].kind, .dataset)
+        expectEqual(segments[0].text, "history.db")
+        expectEqual(segments[1].kind, .table)
+        expectEqual(segments[1].text, "orders")
+        expectEqual(segments[2].kind, .columns)
+        expectEqual(segments[3].kind, .filter)
+        expectEqual(segments[4].kind, .sort)
+        expectEqual(segments[5].kind, .slice)
+        expectEqual(segments[5].text, "[50:75]")
+    }
+
+    await test("Banquet: Nested URLs and CleanURL") {
+        let clean = BanquetParser.cleanURL("/http:/darianhickman.com:8080/some/local/path/file.csv;col1,col2")
+        expectEqual(clean, "http://darianhickman.com:8080/some/local/path/file.csv;col1,col2")
+
+        let nested = "http://localhost:8080/gs:/my-bucket/database.sqlite;customers;id,name,+age?where=age>18&limit=50"
+        let b = try BanquetParser.parse(nested)
+        expectEqual(b.scheme, "gs")
+        expectEqual(b.host, "my-bucket")
+        expectEqual(b.dataSetPath, "database.sqlite")
+        expectEqual(b.table, "customers")
+        expectEqual(b.sortColumn, "age")
+        expectEqual(b.isSortDesc, false)
+        expectEqual(b.limit, 50)
+    }
+
     print("\n-------------------------------------------------------")
     print("Results: \(passed) passed, \(failed) failed")
     print("-------------------------------------------------------\n")
