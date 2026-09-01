@@ -143,8 +143,10 @@ public final class TableViewModel: ObservableObject {
 
     // MARK: - Windowed loading (never blocks the main thread)
 
-    /// Rows per page — honours a document's `_head` `page_size`, else 100.
-    public var pageLimit: Int { doc.style.pageSize ?? 100 }
+    @Published public var customPageLimit: Int? = nil
+
+    /// Rows per page — honours customPageLimit from Banquet, else document's `_head` `page_size`, else 100.
+    public var pageLimit: Int { customPageLimit ?? doc.style.pageSize ?? 100 }
 
     public func loadPage(offset: Int64, limit: Int? = nil) {
         let limit = limit ?? pageLimit
@@ -380,16 +382,49 @@ public final class TableViewModel: ObservableObject {
 
     // MARK: - Banquet Integration
 
-    /// Applies query parameters, sort, and slice offset from a parsed Banquet object.
+    /// Applies query parameters, sort, filters, column projection, and slice offset from a parsed Banquet object.
     public func applyBanquet(_ banquet: Banquet) {
+        // 1. Sort
         if let sortCol = banquet.sortColumn, !sortCol.isEmpty {
-            setSort(column: sortCol, desc: banquet.isSortDesc)
+            self.sortColumn = sortCol
+            self.isSortDesc = banquet.isSortDesc
+        } else {
+            self.sortColumn = nil
+            self.isSortDesc = false
+        }
+        self.isSorting = true
+        persistSort()
+
+        // 2. Select projection (visible / hidden columns)
+        if banquet.select != ["*"] && !banquet.select.isEmpty {
+            let selectSet = Set(banquet.select)
+            var newHidden = Set<String>()
+            for col in columns {
+                if !selectSet.contains(col.name) {
+                    newHidden.insert(col.name)
+                }
+            }
+            self.hiddenColumns = newHidden
+        } else {
+            self.hiddenColumns = []
         }
 
-        if let offset = banquet.offset {
-            loadPage(offset: Int64(offset))
+        // 3. Limit / Page Size
+        if let limit = banquet.limit {
+            self.customPageLimit = limit
         } else {
-            loadPage(offset: 0)
+            self.customPageLimit = nil
+        }
+
+        // 4. Filters & Where clause
+        let parsedFilters = ColumnFilter.parseConditions(banquet.whereClause ?? "")
+        self.filters = parsedFilters
+
+        // 5. Offset & Query
+        let offset = banquet.offset.map { Int64($0) } ?? 0
+        applyFiltersChanged()
+        if offset > 0 {
+            loadPage(offset: offset)
         }
     }
 

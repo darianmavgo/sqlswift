@@ -53,6 +53,129 @@ public struct ColumnFilter: Equatable, Sendable, Hashable {
         if let d = Double(s) { return d }
         return s
     }
+
+    /// Parses SQL/Banquet WHERE conditions into structured `ColumnFilter` items.
+    public static func parseConditions(_ whereClause: String) -> [ColumnFilter] {
+        let trimmed = whereClause.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        var result: [ColumnFilter] = []
+
+        // Split on delimiter tokens
+        let tokens = trimmed.components(separatedBy: CharacterSet(charactersIn: ",;&"))
+        var rawClauses: [String] = []
+        for token in tokens {
+            let andParts = token.components(separatedBy: " AND ")
+            for part in andParts {
+                let lowerAndParts = part.components(separatedBy: " and ")
+                rawClauses.append(contentsOf: lowerAndParts)
+            }
+        }
+
+        for rawClause in rawClauses {
+            let clause = rawClause.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !clause.isEmpty else { continue }
+
+            if let range = clause.range(of: "IS NOT NULL", options: .caseInsensitive) {
+                let col = String(clause[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !col.isEmpty {
+                    result.append(ColumnFilter(column: col, op: .isNotNull, value: ""))
+                    continue
+                }
+            }
+
+            if let range = clause.range(of: "IS NULL", options: .caseInsensitive) {
+                let col = String(clause[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !col.isEmpty {
+                    result.append(ColumnFilter(column: col, op: .isNull, value: ""))
+                    continue
+                }
+            }
+
+            if let range = clause.range(of: "!=") ?? clause.range(of: "<>") {
+                let col = String(clause[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let val = cleanFilterValue(String(clause[range.upperBound...]))
+                if !col.isEmpty {
+                    result.append(ColumnFilter(column: col, op: .notEquals, value: val))
+                    continue
+                }
+            }
+
+            if let range = clause.range(of: ">=") {
+                let col = String(clause[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let val = cleanFilterValue(String(clause[range.upperBound...]))
+                if !col.isEmpty {
+                    result.append(ColumnFilter(column: col, op: .greater, value: val))
+                    continue
+                }
+            } else if let range = clause.range(of: ">") {
+                let col = String(clause[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let val = cleanFilterValue(String(clause[range.upperBound...]))
+                if !col.isEmpty {
+                    result.append(ColumnFilter(column: col, op: .greater, value: val))
+                    continue
+                }
+            }
+
+            if let range = clause.range(of: "<=") {
+                let col = String(clause[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let val = cleanFilterValue(String(clause[range.upperBound...]))
+                if !col.isEmpty {
+                    result.append(ColumnFilter(column: col, op: .less, value: val))
+                    continue
+                }
+            } else if let range = clause.range(of: "<") {
+                let col = String(clause[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let val = cleanFilterValue(String(clause[range.upperBound...]))
+                if !col.isEmpty {
+                    result.append(ColumnFilter(column: col, op: .less, value: val))
+                    continue
+                }
+            }
+
+            if let range = clause.range(of: " LIKE ", options: .caseInsensitive) {
+                let col = String(clause[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                var val = cleanFilterValue(String(clause[range.upperBound...]))
+                if val.hasPrefix("%") && val.hasSuffix("%") && val.count >= 2 {
+                    val = String(val.dropFirst().dropLast())
+                    result.append(ColumnFilter(column: col, op: .contains, value: val))
+                } else if val.hasSuffix("%") {
+                    val = String(val.dropLast())
+                    result.append(ColumnFilter(column: col, op: .startsWith, value: val))
+                } else {
+                    result.append(ColumnFilter(column: col, op: .contains, value: val))
+                }
+                continue
+            }
+
+            if let range = clause.range(of: "==") ?? clause.range(of: "=") {
+                let col = String(clause[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let val = cleanFilterValue(String(clause[range.upperBound...]))
+                if !col.isEmpty {
+                    result.append(ColumnFilter(column: col, op: .equals, value: val))
+                    continue
+                }
+            }
+
+            if let range = clause.range(of: ":") ?? clause.range(of: "~") {
+                let col = String(clause[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let val = cleanFilterValue(String(clause[range.upperBound...]))
+                if !col.isEmpty {
+                    result.append(ColumnFilter(column: col, op: .contains, value: val))
+                    continue
+                }
+            }
+        }
+
+        return result
+    }
+
+    private static func cleanFilterValue(_ raw: String) -> String {
+        var str = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if (str.hasPrefix("'") && str.hasSuffix("'")) || (str.hasPrefix("\"") && str.hasSuffix("\"")) {
+            str = String(str.dropFirst().dropLast())
+        }
+        return str
+    }
 }
 
 /// Window describes the slice of a table the viewer requests.

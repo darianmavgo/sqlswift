@@ -24,27 +24,12 @@ public struct BanquetBarView: View {
 
     public var body: some View {
         HStack(spacing: 6) {
-            // Protocol badge
-            HStack(spacing: 3) {
-                Image(systemName: "link")
-                    .font(.system(size: 9, weight: .bold))
-                Text("banquet")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            }
-            .foregroundColor(isFocused ? .accentColor : .secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(isFocused ? Color.accentColor.opacity(0.15) : Color(NSColor.quaternaryLabelColor).opacity(0.5))
-            )
-            .padding(.leading, 6)
-
             // Direct Native Editable TextField
             TextField("Banquet URL (e.g. sample.db/telemetry/+temperature[0:50])", text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .focused($isFocused)
+                .padding(.leading, 10)
                 .onSubmit {
                     submit()
                 }
