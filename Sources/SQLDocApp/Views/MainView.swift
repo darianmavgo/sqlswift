@@ -92,6 +92,15 @@ public struct MainView: View {
                         GalleryView(appVM: appVM)
                     } else if let activeTableVM {
                         VirtualizedGridView(appVM: appVM, tableVM: activeTableVM)
+                    } else if appVM.activeDocEntry?.doc.tables.isEmpty == true {
+                        VStack(spacing: 12) {
+                            Image(systemName: "tray")
+                                .font(.system(size: 38))
+                                .foregroundColor(.secondary)
+                            Text("This database has no tables or views.")
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                        }
                     } else {
                         ProgressView("Loading schema…")
                     }
