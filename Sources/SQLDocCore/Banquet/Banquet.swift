@@ -11,6 +11,8 @@ public struct Banquet: Sendable, Equatable {
     public var port: String?
     /// Path to the source dataset (e.g. "data/sales.sqlite", "users.csv", "sample.db").
     public var dataSetPath: String
+    /// True if the dataSetPath refers to a container/folder rather than a specific file.
+    public var isCollection: Bool
     /// Table name derived from path or explicit segment.
     public var table: String
     /// Selected columns. Defaults to ["*"].
@@ -39,6 +41,7 @@ public struct Banquet: Sendable, Equatable {
         host: String? = nil,
         port: String? = nil,
         dataSetPath: String = "",
+        isCollection: Bool = false,
         table: String = "",
         select: [String] = ["*"],
         sortColumn: String? = nil,
@@ -55,6 +58,7 @@ public struct Banquet: Sendable, Equatable {
         self.host = host
         self.port = port
         self.dataSetPath = dataSetPath
+        self.isCollection = isCollection
         self.table = table
         self.select = select
         self.sortColumn = sortColumn
@@ -168,6 +172,7 @@ public struct Banquet: Sendable, Equatable {
         var b = self
         switch segment {
         case .dataset:
+            b.isCollection = false
             b.table = ""
             b.select = ["*"]
             b.sortColumn = nil

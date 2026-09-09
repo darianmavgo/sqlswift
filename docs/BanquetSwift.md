@@ -31,18 +31,13 @@ the same way.
 
 ## 1. What the `banquet` repo has to publish
 
-Today its only spec *is* the Go source. Form 2 needs three language-neutral
-artifacts in the `banquet` repo:
+The `banquet/docs` folder defines the normative behavior and conventions. The 5 key standards are:
 
-- **A grammar.** ABNF for the path/query syntax — the `;` explicit vs `/`
-  familiar split, `+col`/`-col` sort, `[a:b]` slice, `col!=val` filter,
-  `?select/where/sort/limit/offset`.
-- **A canonical data model.** The parsed struct — `dataset`, `table`,
-  `select[]`, `where[]`, `sort[]`, `slice`, `limit`, `offset` — as a JSON
-  Schema, not a Go type.
-- **A canonicalization function.** Given a model, the *one* string it serializes
-  to. This is what makes the "Reflect" feature (grid state → shareable URL)
-  produce byte-identical output from sqlswift and sqlite-mavgo.
+- **[banquet-url-syntax.md](https://github.com/darianmavgo/banquet/blob/main/docs/banquet-url-syntax.md)**: The core grammar, distinguishing explicit `;` and familiar `/` syntax, alongside sort/slice/filter behaviors and Collections.
+- **[banquet-query-style.md](https://github.com/darianmavgo/banquet/blob/main/docs/banquet-query-style.md)**: Rules for "Trim View" column ordering (PKs first, grouping columns, hide technical columns, etc.).
+- **[banquet-grid-style.md](https://github.com/darianmavgo/banquet/blob/main/docs/banquet-grid-style.md)**: How columns/rows are drawn (soft-wrapping, translation, group separation).
+- **[banquet-db-list-style.md](https://github.com/darianmavgo/banquet/blob/main/docs/banquet-db-list-style.md)**: Synthetic catalogs for Collections and folders.
+- **[banquet-table-list-style.md](https://github.com/darianmavgo/banquet/blob/main/docs/banquet-table-list-style.md)**: Inline expanding for "Tiny Tables" (< 20 rows).
 
 ## 2. The conformance corpus — `banquet/conformance/`
 
@@ -71,6 +66,8 @@ Sources/SQLDocCore/Banquet/
   Banquet.swift            // the value type — mirrors the JSON Schema
   BanquetParser.swift      // Banquet.parse(_:) throws -> Banquet
   BanquetSerializer.swift  // banquet.canonicalString
+  CollectionCatalog.swift  // Handles synthetic `databases`/`tables` cataloging for IsCollection
+  QueryStyle.swift         // Implements Trim View column ordering logic
 
 Tests/SQLDocCoreTests/
   BanquetConformanceTests.swift   // iterates Tests/Fixtures/banquet/**/*.json
@@ -94,6 +91,8 @@ The bar itself is 100% native and shared with nobody:
   `QueryIntent` the view model applies: open the doc if `dataset` changed,
   select `table`, push `sort`/`where`/`select`/`slice` onto the grid (mapped
   onto sqlswift's keyset pagination — that mapping is sqlswift's own business).
+- **Collections Handling**: If `IsCollection` is true, the `CollectionCatalog` generates an in-memory catalog database for the current directory level. The grid renders `databases` and `tables` following the `banquet-db-list-style.md`.
+- **Tiny Tables**: For tables with fewer than 20 rows, `TableListView` expands the content inline.
 - **Reflect-out:** any grid interaction (sort a header, filter, hide a column)
   updates the view model's `Banquet` value → `canonicalString` → bar text
   updates → copy button / `⌘C` yields the shareable URL. Suppressed when the

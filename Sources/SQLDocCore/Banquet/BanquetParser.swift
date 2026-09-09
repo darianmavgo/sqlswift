@@ -98,7 +98,7 @@ public enum BanquetParser {
         }
 
         // Decompose path into DataSetPath, Table, and ColumnPath
-        var (dataSetPath, table, columnPath) = parseDataSetColumnPath(path)
+        var (dataSetPath, isCollection, table, columnPath) = parseDataSetColumnPath(path)
 
         // If dataset was empty but host was parsed (and host has database extension), use host
         if dataSetPath.isEmpty, let h = host, knownExtensions.contains(where: { h.lowercased().hasSuffix($0) }) {
@@ -155,6 +155,7 @@ public enum BanquetParser {
             host: host,
             port: port,
             dataSetPath: dataSetPath,
+            isCollection: isCollection,
             table: table,
             select: select,
             sortColumn: sortCol,
@@ -171,14 +172,14 @@ public enum BanquetParser {
 
     // MARK: - Internal Decomposers
 
-    private static func parseDataSetColumnPath(_ rawpath: String) -> (dataSetPath: String, table: String, columnPath: String) {
+    private static func parseDataSetColumnPath(_ rawpath: String) -> (dataSetPath: String, isCollection: Bool, table: String, columnPath: String) {
         // Explicit semicolon delimiter notation: dataset;table;columns
         if rawpath.contains(";") {
             let parts = rawpath.components(separatedBy: ";")
             let dataSet = parts.first ?? ""
             let table = parts.count > 1 ? parts[1] : ""
             let columnPath = parts.count > 2 ? parts.dropFirst(2).joined(separator: ";") : ""
-            return (dataSet, table, columnPath)
+            return (dataSet, false, table, columnPath)
         }
 
         // Heuristic slash-delimited notation: path/to/file.ext/table/column
@@ -188,11 +189,44 @@ public enum BanquetParser {
             if knownExtensions.contains(where: { lower.hasSuffix($0) }) && lower != "test.html" {
                 let datasetPath = parts[0...i].joined(separator: "/")
                 let columnPath = (i + 1 < parts.count) ? parts[(i + 1)...].joined(separator: "/") : ""
-                return (datasetPath, "", columnPath)
+                return (datasetPath, false, "", columnPath)
             }
         }
 
-        return (rawpath, "", "")
+        // Collection notation: container path with no recognized extension
+        var containerPath: [String] = []
+        var catalogTable = ""
+        var restPath: [String] = []
+        var foundCatalogOrClause = false
+
+        for part in parts {
+            if foundCatalogOrClause {
+                restPath.append(part)
+                continue
+            }
+
+            let lower = part.lowercased()
+            let isClauseLike = part.contains(",") || part.hasPrefix("+") || part.hasPrefix("-") || part.contains("!=") || part.contains("=") || (part.hasPrefix("[") && part.contains(":"))
+            
+            if lower == "databases" || lower == "tables" {
+                catalogTable = lower
+                foundCatalogOrClause = true
+            } else if isClauseLike {
+                catalogTable = "databases"
+                restPath.append(part)
+                foundCatalogOrClause = true
+            } else {
+                containerPath.append(part)
+            }
+        }
+
+        let datasetPath = containerPath.joined(separator: "/")
+        let columnPath = restPath.joined(separator: "/")
+        if catalogTable.isEmpty && columnPath.isEmpty {
+            catalogTable = "databases"
+        }
+
+        return (datasetPath, true, catalogTable, columnPath)
     }
 
     private static func getSegments(_ columnPath: String) -> [String] {

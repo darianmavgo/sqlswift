@@ -125,7 +125,9 @@ public struct BanquetBarView: View {
         .onChange(of: isFocused) { _, focused in
             appVM.isBanquetBarEditing = focused
             if !focused {
-                syncTextFromViewModel()
+                Task { @MainActor in
+                    syncTextFromViewModel()
+                }
             }
         }
     }
