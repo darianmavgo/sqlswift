@@ -451,6 +451,103 @@ func runAllTests() async {
         expectEqual(b.limit, 50)
     }
 
+    // BanquetComposer Tests
+    await test("BanquetComposer: SQL Construction") {
+        let tests: [(url: String, expected: String)] = [
+            // --- 1. Basic Table Inference ---
+            (url: "users.csv", expected: "SELECT * FROM \"tb0\""),
+            (url: "data.sqlite", expected: "SELECT * FROM \"sqlite_master\""),
+            (url: "data.sqlite;users", expected: "SELECT * FROM \"users\""),
+
+            // --- 2. Column Selection ---
+            (url: "data.sqlite;users;id", expected: "SELECT \"id\" FROM \"users\""),
+            (url: "data.sqlite;users;id,name,email", expected: "SELECT \"id\", \"name\", \"email\" FROM \"users\""),
+            (url: "data.sqlite;users", expected: "SELECT * FROM \"users\""),
+            (url: "data.sqlite;users;*", expected: "SELECT * FROM \"users\""),
+
+            // --- 3. Sorting ---
+            (url: "data.sqlite;users;+name", expected: "SELECT * FROM \"users\" ORDER BY \"name\" ASC"),
+            (url: "data.sqlite;users;-created_at", expected: "SELECT * FROM \"users\" ORDER BY \"created_at\" DESC"),
+            (url: "data.sqlite;users;id,+name", expected: "SELECT \"id\" FROM \"users\" ORDER BY \"name\" ASC"),
+            (url: "data.sqlite;users;id,-age,email", expected: "SELECT \"id\", \"email\" FROM \"users\" ORDER BY \"age\" DESC"),
+
+            // --- 4. Slice Notation (Limit/Offset) ---
+            (url: "data.sqlite;users[0:10]", expected: "SELECT * FROM \"users\" LIMIT 10 OFFSET 0"),
+            (url: "data.sqlite;users[20:30]", expected: "SELECT * FROM \"users\" LIMIT 10 OFFSET 20"),
+            (url: "data.sqlite;users;id[5:15],name", expected: "SELECT \"id\", \"name\" FROM \"users\" LIMIT 10 OFFSET 5"),
+            (url: "data.sqlite;users;id,name[0:50]", expected: "SELECT \"id\", \"name\" FROM \"users\" LIMIT 50 OFFSET 0"),
+
+            // --- 5. Filtering (WHERE) ---
+            (url: "data.sqlite;users?where=age>18", expected: "SELECT * FROM \"users\" WHERE age>18"),
+            (url: "data.sqlite;users;status!=active?where=age>18", expected: "SELECT * FROM \"users\" WHERE age>18 AND status != 'active'"),
+            (url: "data.sqlite;users;status!=active,role!=admin", expected: "SELECT * FROM \"users\" WHERE status != 'active' AND role != 'admin'"),
+
+            // --- 6. Grouping and Having ---
+            (url: "data.sqlite;users?groupby=country", expected: "SELECT * FROM \"users\" GROUP BY \"country\""),
+            (url: "data.sqlite;users?groupby=country&having=count(*)>5", expected: "SELECT * FROM \"users\" GROUP BY \"country\" HAVING count(*)>5"),
+
+            // --- 7. Complex Combinations ---
+            (url: "data.sqlite;users;id,name,-age?where=active=1&limit=5", expected: "SELECT \"id\", \"name\" FROM \"users\" WHERE active=1 ORDER BY \"age\" DESC LIMIT 5"),
+            (url: "data.sqlite;users;id,email,+joined[10:20]", expected: "SELECT \"id\", \"email\" FROM \"users\" ORDER BY \"joined\" ASC LIMIT 10 OFFSET 10"),
+            (url: "data.sqlite;users;name!=O%27Reilly", expected: "SELECT * FROM \"users\" WHERE name != 'O''Reilly'"),
+
+            // --- 8. Heuristic Path Parsing (No Semicolons) ---
+            (url: "file.csv/col1,col2", expected: "SELECT \"col1\", \"col2\" FROM \"tb0\""),
+            (url: "db.sqlite/mytable/col1", expected: "SELECT \"col1\" FROM \"mytable\""),
+            (url: "db.sqlite/mytable", expected: "SELECT * FROM \"mytable\"")
+        ]
+
+        for tc in tests {
+            let bq = try BanquetParser.parse(tc.url)
+            let sql = BanquetComposer.compose(bq)
+            expectEqual(sql, tc.expected, "URL: \(tc.url)")
+        }
+    }
+
+    // BanquetParser Tests
+    await test("BanquetParser: Collections") {
+        let cases: [(url: String, isCollection: Bool, dataSetPath: String, table: String, orderBy: String?, sortDir: String?)] = [
+            ("/", true, ".", "databases", nil, nil),
+            ("/d1", true, "d1", "databases", nil, nil),
+            ("/local/Documents/Income", true, "local/Documents/Income", "databases", nil, nil),
+            ("/local/Documents/Income/", true, "local/Documents/Income/", "databases", nil, nil),
+            ("/local/Documents/Income/databases/-size_bytes", true, "local/Documents/Income", "databases", "size_bytes", "DESC"),
+            ("/local/Documents/Income/tables/+database", true, "local/Documents/Income", "tables", "database", "ASC"),
+            ("/my-bucket/reports.db/orders", false, "my-bucket/reports.db", "orders", nil, nil),
+            ("data/sales.sqlite;orders;amount", false, "data/sales.sqlite", "orders", nil, nil)
+        ]
+
+        for c in cases {
+            let b = try BanquetParser.parse(c.url)
+            expectEqual(b.isCollection, c.isCollection, "URL: \(c.url)")
+            expectEqual(b.dataSetPath, c.dataSetPath, "URL: \(c.url)")
+            expectEqual(b.table, c.table, "URL: \(c.url)")
+            expectEqual(b.sortColumn, c.orderBy, "URL: \(c.url)")
+            expectEqual(b.sortDirection, c.sortDir, "URL: \(c.url)")
+        }
+    }
+
+    await test("BanquetParser: GroupBy from path") {
+        let b = try BanquetParser.parse("data.sqlite/tb/some_column(group_column)")
+        expectEqual(b.groupBy, "group_column")
+    }
+
+    await test("BanquetParser: Legacy literal prefixes") {
+        let b = try BanquetParser.parse("data.sqlite/tb/^column1,!^column2")
+        expectEqual(b.select, ["^column1", "!^column2"])
+        expectEqual(b.sortColumn, nil)
+    }
+    
+    await test("BanquetParser: Super ugly nested URL") {
+        let ugly = "http://localhost:8080/https://bucket.appspot.com:8080/v1/{banquet}/path:with;@+,$/[^]|\\< >~%25/column1,column2/+const?orderid=-1&tag=prime+val&filter={status:active}&search=~alt#fragment-top"
+        let b = try BanquetParser.parse(ugly)
+        expectEqual(b.host, "bucket.appspot.com")
+        expectEqual(b.port, "8080")
+        expectEqual(b.dataSetPath, "v1/{banquet}/path:with")
+        expectEqual(b.table, "@+,$/")
+        expectEqual(b.rawQuery, "orderid=-1&tag=prime+val&filter={status:active}&search=~alt#fragment-top")
+    }
+
     print("\n-------------------------------------------------------")
     print("Results: \(passed) passed, \(failed) failed")
     print("-------------------------------------------------------\n")
