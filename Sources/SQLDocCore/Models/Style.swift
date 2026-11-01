@@ -17,6 +17,8 @@ public struct Style: Equatable, Codable, Sendable {
     public var textColor: String?
     public var customCSS: String?
     public var pageSize: Int?
+    /// Per-table column order hints from `_style` (`"<table>.columns"` or `"columns"` for all tables).
+    public var tableColumns: [String: [String]] = [:]
 
     public init(title: String? = nil, accent: String = "#2563eb", theme: String = "auto") {
         self.title = title

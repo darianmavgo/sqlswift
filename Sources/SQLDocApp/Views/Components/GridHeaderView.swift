@@ -43,7 +43,13 @@ public struct GridHeaderView: View {
     private func headerCell(_ col: Column) -> some View {
         let width = (tableVM.columnWidths[col.name] ?? DesignToken.colDefaultWidth) * zoom
         let isSorted = tableVM.sortColumn == col.name
-        return HStack(spacing: 6) {
+        let isRightAligned = col.isNumeric
+        return HStack(spacing: 4) {
+            if isRightAligned {
+                sortGlyph(isSorted: isSorted, hovering: hoverCol == col.name)
+                Spacer(minLength: 0)
+            }
+
             Text(col.name)
                 .font(.system(size: 12 * zoom, weight: .semibold))
                 .foregroundColor(palette.ink)
@@ -58,19 +64,20 @@ public struct GridHeaderView: View {
                     .cornerRadius(3)
             }
 
-            Spacer(minLength: 0)
-
-            sortGlyph(isSorted: isSorted, hovering: hoverCol == col.name)
+            if !isRightAligned {
+                Spacer(minLength: 0)
+                sortGlyph(isSorted: isSorted, hovering: hoverCol == col.name)
+            }
         }
         .padding(.horizontal, 8)
-        .frame(width: width, height: headerHeight, alignment: .leading)
+        .frame(width: width, height: headerHeight, alignment: isRightAligned ? .trailing : .leading)
         .background(palette.head)
         .contentShape(Rectangle())
         .onHover { hoverCol = $0 ? col.name : (hoverCol == col.name ? nil : hoverCol) }
         .onTapGesture { tableVM.sortBy(column: col.name) }
         .contextMenu { sortMenu(col) }
         .overlay(alignment: .trailing) {
-            Rectangle().fill(palette.rule).frame(width: 1)
+            Rectangle().fill(palette.ruleStrong.opacity(0.75)).frame(width: 1)
         }
         .overlay(alignment: .trailing) { resizeGrip(col) }
     }

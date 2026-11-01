@@ -64,14 +64,10 @@ public enum BanquetSerializer {
             base += "[0:\(limit)]"
         }
 
-        // Query parameters (?where=...&groupby=...)
+        // Query parameters (?where=...&groupby=...&custom)
         var queryParams: [String] = []
         if let whereClause = banquet.whereClause, !whereClause.isEmpty {
-            if let encoded = whereClause.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-                queryParams.append("where=\(encoded)")
-            } else {
-                queryParams.append("where=\(whereClause)")
-            }
+            queryParams.append("where=\(whereClause)")
         }
 
         if let groupBy = banquet.groupBy, !groupBy.isEmpty {
@@ -80,6 +76,13 @@ public enum BanquetSerializer {
 
         if let having = banquet.having, !having.isEmpty {
             queryParams.append("having=\(having)")
+        }
+
+        for extra in banquet.extraQueryParams {
+            let trimmed = extra.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty && !queryParams.contains(trimmed) {
+                queryParams.append(trimmed)
+            }
         }
 
         if !queryParams.isEmpty {

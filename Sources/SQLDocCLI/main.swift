@@ -5,14 +5,14 @@ import SQLDocCore
 let version = AppIdentity.version
 
 let usage = """
-sqldoc — open a SQLite database as a document (Pure Swift & SwiftUI)
+sqlswift — open a SQLite database as a document (Pure Swift & SwiftUI)
 
 Usage:
-  sqldoc                        open the start page (recent files, drag & drop)
-  sqldoc <file.db> [more.db...] open one or more databases
-  sqldoc info  <file.db>        print what the document contains
-  sqldoc bench <file.db>        measure read latency and scroll throughput
-  sqldoc export <file.db> <table> [output.csv]  export table to CSV
+  sqlswift                        open the start page (recent files, drag & drop)
+  sqlswift <file.db> [more.db...] open one or more databases
+  sqlswift info  <file.db>        print what the document contains
+  sqlswift bench <file.db>        measure read latency and scroll throughput
+  sqlswift export <file.db> <table> [output.csv]  export table to CSV
 
 Flags:
   -immutable    promise the file will not change while open (skips locking & WAL)
@@ -54,7 +54,7 @@ func runCLI() {
     }
 
     if showVersion {
-        print("sqldoc \(version) · Pure Swift 6 & native SQLite")
+        print("sqlswift \(version) · Pure Swift 6 & native SQLite")
         return
     }
 
@@ -71,7 +71,7 @@ func runCLI() {
         do {
             try printInfo(path: path, options: options)
         } catch {
-            fputs("sqldoc: \(error.localizedDescription)\n", stderr)
+            fputs("sqlswift: \(error.localizedDescription)\n", stderr)
             exit(1)
         }
 
@@ -86,7 +86,7 @@ func runCLI() {
             do {
                 try await printBench(path: path, options: options)
             } catch {
-                fputs("sqldoc: \(error.localizedDescription)\n", stderr)
+                fputs("sqlswift: \(error.localizedDescription)\n", stderr)
                 exit(1)
             }
             sema.signal()
@@ -95,7 +95,7 @@ func runCLI() {
 
     case "export":
         guard subArgs.count >= 2 else {
-            print("Usage: sqldoc export <file.db> <table_name> [output.csv]")
+            print("Usage: sqlswift export <file.db> <table_name> [output.csv]")
             exit(2)
         }
         let dbPath = subArgs[0]
@@ -112,7 +112,7 @@ func runCLI() {
                 print(csv)
             }
         } catch {
-            fputs("sqldoc: \(error.localizedDescription)\n", stderr)
+            fputs("sqlswift: \(error.localizedDescription)\n", stderr)
             exit(1)
         }
 
@@ -170,7 +170,7 @@ func printInfo(path: String, options: DocOptions) throws {
 }
 
 func printBench(path: String, options: DocOptions) async throws {
-    print("Running sqldoc benchmark against \(path)...")
+    print("Running SqlSwift benchmark against \(path)...")
     let result = try await BenchmarkRunner.run(path: path, options: options)
 
     let fileName = URL(fileURLWithPath: result.path).lastPathComponent
@@ -215,12 +215,12 @@ func openFiles(paths: [String], launchApp: Bool) {
     openProcess.executableURL = URL(fileURLWithPath: "/usr/bin/open")
     
     var openArgs: [String] = []
-    if let appPath = ProcessInfo.processInfo.environment["SQLDOC_APP"] {
+    if let appPath = ProcessInfo.processInfo.environment["SQLSWIFT_APP"] ?? ProcessInfo.processInfo.environment["SQLDOC_APP"] {
         openArgs.append(contentsOf: ["-a", appPath])
     } else {
         let candidates = [
-            "/Applications/sqldoc.app",
-            "\(NSHomeDirectory())/Applications/sqldoc.app"
+            "/Applications/SqlSwift.app",
+            "\(NSHomeDirectory())/Applications/SqlSwift.app"
         ]
         for c in candidates where FileManager.default.fileExists(atPath: c) {
             openArgs.append(contentsOf: ["-a", c])
@@ -236,7 +236,7 @@ func openFiles(paths: [String], launchApp: Bool) {
         openProcess.arguments = openArgs
         try? openProcess.run()
     } else {
-        print("sqldoc: Launching viewer. For CLI inspection use `sqldoc info <file.db>` or `sqldoc bench <file.db>`.")
+        print("sqlswift: Launching viewer. For CLI inspection use `sqlswift info <file.db>` or `sqlswift bench <file.db>`.")
     }
 }
 

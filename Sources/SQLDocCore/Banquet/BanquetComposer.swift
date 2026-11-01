@@ -62,11 +62,18 @@ public enum BanquetComposer {
     }
     
     /// QuoteIdentifier wraps a string in double quotes and escapes existing double quotes.
+    /// Leaves SQL function calls and expressions (e.g. `count(*)`, `min(date)`, `max(date)`) unquoted.
     public static func quoteIdentifier(_ s: String) -> String {
-        if s.isEmpty || s == "*" {
-            return s
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "*" {
+            return trimmed
         }
-        let escaped = s.replacingOccurrences(of: "\"", with: "\"\"")
+        if (trimmed.contains("(") && trimmed.contains(")")) ||
+           trimmed.range(of: " as ", options: .caseInsensitive) != nil ||
+           trimmed.lowercased().hasPrefix("distinct ") {
+            return trimmed
+        }
+        let escaped = trimmed.replacingOccurrences(of: "\"", with: "\"\"")
         return "\"\(escaped)\""
     }
     

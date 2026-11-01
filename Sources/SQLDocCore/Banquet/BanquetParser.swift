@@ -11,6 +11,9 @@ public enum BanquetParser {
     /// Cleans and standardizes raw URL strings before parsing.
     public static func cleanURL(_ rawURL: String) -> String {
         var str = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        while str.hasSuffix(";") {
+            str = String(str.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         if str == "/" { return "." }
         if str.hasPrefix("/") {
             str = String(str.dropFirst())
@@ -71,6 +74,9 @@ public enum BanquetParser {
         if let queryIdx = path.firstIndex(of: "?") {
             rawQuery = String(path[path.index(after: queryIdx)...])
             path = String(path[..<queryIdx])
+        } else if let ampIdx = path.firstIndex(of: "&") {
+            rawQuery = String(path[path.index(after: ampIdx)...])
+            path = String(path[..<ampIdx])
         }
 
         // Separate scheme and host if standard URL format
@@ -97,6 +103,30 @@ public enum BanquetParser {
             path = String(path.dropFirst())
         }
 
+        // Check if the entire input is a standalone SQL SELECT statement
+        if let sqlParsed = parseEmbeddedSQLStatement(in: cleaned) {
+            let extraQueryParams = parseExtraQueryParams(rawQuery)
+            return Banquet(
+                scheme: scheme,
+                host: host,
+                port: port,
+                dataSetPath: "",
+                isCollection: false,
+                table: sqlParsed.table,
+                select: sqlParsed.select,
+                sortColumn: sqlParsed.sortColumn,
+                isSortDesc: sqlParsed.isSortDesc,
+                whereClause: sqlParsed.whereClause,
+                limit: sqlParsed.limit,
+                offset: sqlParsed.offset,
+                groupBy: sqlParsed.groupBy,
+                having: sqlParsed.having,
+                extraQueryParams: extraQueryParams,
+                rawQuery: rawQuery,
+                rawURL: rawURL
+            )
+        }
+
         // Decompose path into DataSetPath, Table, and ColumnPath
         var (dataSetPath, isCollection, table, columnPath) = parseDataSetColumnPath(path)
 
@@ -104,6 +134,39 @@ public enum BanquetParser {
         if dataSetPath.isEmpty, let h = host, knownExtensions.contains(where: { h.lowercased().hasSuffix($0) }) {
             dataSetPath = h
             host = nil
+        }
+
+        // Check if columnPath contains a pasted/edited SQL SELECT query (e.g. "daily_bars.db/daily_bar[0:100]/select count(*), min(date), max(date) from daily_bar where symbol='QQQ'")
+        let fullColumnPath = rawQuery.isEmpty ? columnPath : "\(columnPath)?\(rawQuery)"
+        if let (prefixPath, sqlPart) = splitPrefixAndSQL(fullColumnPath),
+           let sqlParsed = parseEmbeddedSQLStatement(in: sqlPart) {
+            var fallbackTable = table
+            if fallbackTable.isEmpty {
+                fallbackTable = parseTable(prefixPath)
+            }
+            if let bracketIdx = fallbackTable.firstIndex(of: "[") {
+                fallbackTable = String(fallbackTable[..<bracketIdx])
+            }
+            let (sliceLimit, sliceOffset) = parseSlice(prefixPath)
+            let finalTable = !sqlParsed.table.isEmpty ? sqlParsed.table : fallbackTable
+            return Banquet(
+                scheme: scheme,
+                host: host,
+                port: port,
+                dataSetPath: dataSetPath,
+                isCollection: false,
+                table: finalTable,
+                select: sqlParsed.select,
+                sortColumn: sqlParsed.sortColumn,
+                isSortDesc: sqlParsed.isSortDesc,
+                whereClause: sqlParsed.whereClause,
+                limit: sqlParsed.limit ?? sliceLimit,
+                offset: sqlParsed.offset ?? sliceOffset,
+                groupBy: sqlParsed.groupBy,
+                having: sqlParsed.having,
+                rawQuery: rawQuery,
+                rawURL: rawURL
+            )
         }
 
         // Heuristic table deduction if not explicit
@@ -149,6 +212,7 @@ public enum BanquetParser {
         // GroupBy & Having
         let groupBy = parseGroupBy(path: path, query: rawQuery)
         let having = parseHaving(rawQuery)
+        let extraQueryParams = parseExtraQueryParams(rawQuery)
 
         return Banquet(
             scheme: scheme,
@@ -165,6 +229,7 @@ public enum BanquetParser {
             offset: offset,
             groupBy: groupBy,
             having: having,
+            extraQueryParams: extraQueryParams,
             rawQuery: rawQuery,
             rawURL: rawURL
         )
@@ -278,7 +343,7 @@ public enum BanquetParser {
         var collected: [String] = []
         for segment in segments {
             guard !segment.isEmpty else { continue }
-            let cols = segment.components(separatedBy: ",")
+            let cols = splitTopLevelCommas(segment)
             for rawCol in cols {
                 var col = rawCol.trimmingCharacters(in: .whitespacesAndNewlines)
                 if let bracketIdx = col.firstIndex(of: "["), col.contains(":") {
@@ -301,7 +366,7 @@ public enum BanquetParser {
         var conditions: [String] = []
         for segment in segments {
             guard !segment.isEmpty else { continue }
-            let parts = segment.components(separatedBy: ",")
+            let parts = splitTopLevelCommas(segment)
             for part in parts {
                 if part.contains("!=") {
                     let kv = part.components(separatedBy: "!=")
@@ -310,6 +375,9 @@ public enum BanquetParser {
                         var val = kv[1].trimmingCharacters(in: .whitespacesAndNewlines)
                         if let decoded = val.removingPercentEncoding {
                             val = decoded
+                        }
+                        if (val.hasPrefix("'") && val.hasSuffix("'")) || (val.hasPrefix("\"") && val.hasSuffix("\"")), val.count >= 2 {
+                            val = String(val.dropFirst().dropLast())
                         }
                         if Double(val) == nil {
                             let escaped = val.replacingOccurrences(of: "'", with: "''")
@@ -324,6 +392,9 @@ public enum BanquetParser {
                         var val = kv[1].trimmingCharacters(in: .whitespacesAndNewlines)
                         if let decoded = val.removingPercentEncoding {
                             val = decoded
+                        }
+                        if (val.hasPrefix("'") && val.hasSuffix("'")) || (val.hasPrefix("\"") && val.hasSuffix("\"")), val.count >= 2 {
+                            val = String(val.dropFirst().dropLast())
                         }
                         if Double(val) == nil {
                             let escaped = val.replacingOccurrences(of: "'", with: "''")
@@ -401,12 +472,29 @@ public enum BanquetParser {
         return (nil, offset > 0 ? offset : nil)
     }
 
+    private static let sqlFunctionNames: Set<String> = [
+        "count", "min", "max", "sum", "avg", "total", "group_concat",
+        "coalesce", "round", "abs", "cast", "strftime", "date", "datetime",
+        "julianday", "unixepoch", "ifnull", "nullif", "typeof", "length",
+        "lower", "upper", "substr", "trim", "ltrim", "rtrim", "replace"
+    ]
+
     private static func parseGroupBy(path: String, query: String) -> String? {
         if let g = parseQueryParam("groupby", in: query) {
             return g
         }
         if let start = path.firstIndex(of: "("), let end = path.firstIndex(of: ")"), start < end {
-            return String(path[path.index(after: start)..<end])
+            let inside = String(path[path.index(after: start)..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if inside == "*" || inside.isEmpty {
+                return nil
+            }
+            // Extract the identifier right before '(' to verify it isn't a SQL aggregate/scalar function
+            let prefix = path[..<start]
+            let ident = prefix.split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "_" }).last.map { String($0).lowercased() } ?? ""
+            if sqlFunctionNames.contains(ident) {
+                return nil
+            }
+            return inside
         }
         return nil
     }
@@ -426,5 +514,204 @@ public enum BanquetParser {
             }
         }
         return nil
+    }
+
+    private static let standardQueryParamKeys: Set<String> = [
+        "where", "filter", "limit", "offset", "sort", "orderby", "order", "groupby", "having"
+    ]
+
+    private static func parseExtraQueryParams(_ query: String) -> [String] {
+        guard !query.isEmpty else { return [] }
+        let params = query.components(separatedBy: "&")
+        var extra: [String] = []
+        for p in params {
+            let trimmed = p.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let kv = trimmed.components(separatedBy: "=")
+            let key = kv[0].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !standardQueryParamKeys.contains(key) {
+                extra.append(trimmed)
+            }
+        }
+        return extra
+    }
+
+    // MARK: - SQL Statement & Expression Helpers
+
+    private static func splitTopLevelCommas(_ input: String) -> [String] {
+        var result: [String] = []
+        var current = ""
+        var parenDepth = 0
+        var inSingleQuote = false
+        var inDoubleQuote = false
+
+        for ch in input {
+            if ch == "'" && !inDoubleQuote {
+                inSingleQuote.toggle()
+                current.append(ch)
+            } else if ch == "\"" && !inSingleQuote {
+                inDoubleQuote.toggle()
+                current.append(ch)
+            } else if !inSingleQuote && !inDoubleQuote {
+                if ch == "(" {
+                    parenDepth += 1
+                    current.append(ch)
+                } else if ch == ")" {
+                    parenDepth = max(0, parenDepth - 1)
+                    current.append(ch)
+                } else if ch == "," && parenDepth == 0 {
+                    result.append(current)
+                    current = ""
+                } else {
+                    current.append(ch)
+                }
+            } else {
+                current.append(ch)
+            }
+        }
+        if !current.isEmpty {
+            result.append(current)
+        }
+        return result
+    }
+
+    private static func splitPrefixAndSQL(_ columnPath: String) -> (prefix: String, sql: String)? {
+        let trimmed = columnPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.lowercased().hasPrefix("select ") {
+            return ("", trimmed)
+        }
+        if let range = trimmed.range(of: "/select ", options: .caseInsensitive) {
+            let prefix = String(trimmed[..<range.lowerBound])
+            let sql = String(trimmed[trimmed.index(after: range.lowerBound)...])
+            return (prefix, sql)
+        }
+        return nil
+    }
+
+    private struct ParsedSQLSelect {
+        var select: [String]
+        var table: String
+        var whereClause: String?
+        var groupBy: String?
+        var having: String?
+        var sortColumn: String?
+        var isSortDesc: Bool
+        var limit: Int?
+        var offset: Int?
+    }
+
+    /// Parses a SQL `SELECT ...` statement into Banquet components so pasted SQL in the Banquet bar
+    /// can be edited and executed seamlessly.
+    private static func parseEmbeddedSQLStatement(in raw: String) -> ParsedSQLSelect? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while s.hasSuffix(";") {
+            s = String(s.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard s.lowercased().hasPrefix("select ") else { return nil }
+        let afterSelect = String(s.dropFirst("select ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Find top-level SQL clauses outside parentheses and quotes
+        let clauseKeywords = ["FROM", "WHERE", "GROUP BY", "HAVING", "ORDER BY", "LIMIT", "OFFSET"]
+        let chars = Array(afterSelect)
+        let upperChars = Array(afterSelect.uppercased())
+        var parenDepth = 0
+        var inSingle = false
+        var inDouble = false
+
+        var hits: [(keyword: String, start: Int, afterEnd: Int)] = []
+        var i = 0
+        while i < chars.count {
+            let ch = chars[i]
+            if ch == "'" && !inDouble {
+                inSingle.toggle()
+                i += 1
+                continue
+            }
+            if ch == "\"" && !inSingle {
+                inDouble.toggle()
+                i += 1
+                continue
+            }
+            if !inSingle && !inDouble {
+                if ch == "(" { parenDepth += 1; i += 1; continue }
+                if ch == ")" { parenDepth = max(0, parenDepth - 1); i += 1; continue }
+                if parenDepth == 0 {
+                    let prevIsBoundary = (i == 0) || chars[i - 1].isWhitespace
+                    if prevIsBoundary {
+                        for kw in clauseKeywords {
+                            let kwChars = Array(kw)
+                            if i + kwChars.count <= upperChars.count,
+                               Array(upperChars[i..<(i + kwChars.count)]) == kwChars {
+                                let afterIdx = i + kwChars.count
+                                let nextIsBoundary = (afterIdx == upperChars.count) || chars[afterIdx].isWhitespace
+                                if nextIsBoundary {
+                                    hits.append((kw, i, afterIdx))
+                                    i = afterIdx
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            i += 1
+        }
+
+        let selectEnd = hits.first?.start ?? chars.count
+        let selectRaw = String(chars[0..<selectEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let selectCols = splitTopLevelCommas(selectRaw)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var table = ""
+        var whereClause: String?
+        var groupBy: String?
+        var having: String?
+        var sortColumn: String?
+        var isSortDesc = false
+        var limit: Int?
+        var offset: Int?
+
+        for (idx, hit) in hits.enumerated() {
+            let valueStart = hit.afterEnd
+            let valueEnd = (idx + 1 < hits.count) ? hits[idx + 1].start : chars.count
+            let val = String(chars[valueStart..<valueEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
+            switch hit.keyword {
+            case "FROM":
+                table = val.trimmingCharacters(in: CharacterSet(charactersIn: "\"'` "))
+            case "WHERE":
+                whereClause = val.isEmpty ? nil : val
+            case "GROUP BY":
+                groupBy = val.isEmpty ? nil : val
+            case "HAVING":
+                having = val.isEmpty ? nil : val
+            case "ORDER BY":
+                let parts = val.split(whereSeparator: \.isWhitespace).map(String.init)
+                if let first = parts.first {
+                    sortColumn = first.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`"))
+                    if parts.count > 1 && parts[1].uppercased() == "DESC" {
+                        isSortDesc = true
+                    }
+                }
+            case "LIMIT":
+                limit = Int(val.split(whereSeparator: \.isWhitespace).first ?? "")
+            case "OFFSET":
+                offset = Int(val.split(whereSeparator: \.isWhitespace).first ?? "")
+            default:
+                break
+            }
+        }
+
+        return ParsedSQLSelect(
+            select: selectCols.isEmpty ? ["*"] : selectCols,
+            table: table,
+            whereClause: whereClause,
+            groupBy: groupBy,
+            having: having,
+            sortColumn: sortColumn,
+            isSortDesc: isSortDesc,
+            limit: limit,
+            offset: offset
+        )
     }
 }

@@ -25,6 +25,20 @@ public final class TableState: @unchecked Sendable {
     private var _maxID: Int64?
     private var _hasBounds: Bool = false
     private var _boundsChecked: Bool = false
+    private var _probe: TableProbe?
+
+    public var cachedProbe: TableProbe? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _probe
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _probe = newValue
+        }
+    }
 
     public init(name: String) {
         self.name = name
@@ -92,6 +106,43 @@ public final class Doc: @unchecked Sendable {
     private var states: [String: TableState] = [:]
     private var _tables: [Table] = []
     private var _style: Style = .default
+    private var lastObservedStamp: String = ""
+
+    /// Computes a lightweight fingerprint of the `.db` and `.db-wal` file modification times and sizes.
+    private static func diskStamp(for path: String) -> String {
+        let fm = FileManager.default
+        func part(_ p: String) -> String {
+            guard let attrs = try? fm.attributesOfItem(atPath: p) else { return "-" }
+            let sz = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+            let mt = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            return "\(sz):\(Int64(mt * 1000))"
+        }
+        return "\(part(path))|\(part(path + "-wal"))"
+    }
+
+    /// Returns true if the database or its WAL file has been modified on disk since last checked/reloaded.
+    public func checkModifiedOnDisk() -> Bool {
+        let current = Doc.diskStamp(for: path)
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        if lastObservedStamp.isEmpty {
+            lastObservedStamp = current
+            return false
+        }
+        return current != lastObservedStamp
+    }
+
+    /// Clears cached per-table bounds, probes, and counts after an external write to the `.db` or `.db-wal`.
+    public func invalidateCaches() {
+        let current = Doc.diskStamp(for: path)
+        stateLock.lock()
+        lastObservedStamp = current
+        states.removeAll()
+        stateLock.unlock()
+        counterWorker.reset()
+        try? discover()
+        loadStyle()
+    }
 
     // Idle tracking: background work waits for a 300ms lull in foreground reads
     private var lastReadNano: UInt64 = DispatchTime.now().uptimeNanoseconds
@@ -105,6 +156,17 @@ public final class Doc: @unchecked Sendable {
     public static func quoteIdent(_ name: String) -> String {
         let escaped = name.replacingOccurrences(of: "\"", with: "\"\"")
         return "\"\(escaped)\""
+    }
+
+    /// Checks the SQLite file-format magic string directly, with no locking or
+    /// SQLite handle involved. A zero-byte file is a valid, brand-new empty
+    /// database per the SQLite file format spec.
+    static func hasSQLiteHeader(at path: String, size: Int64) -> Bool {
+        if size == 0 { return true }
+        guard let handle = FileHandle(forReadingAtPath: path) else { return false }
+        defer { handle.closeFile() }
+        let header = handle.readData(ofLength: 16)
+        return header == Data("SQLite format 3\0".utf8)
     }
 
     public static func open(path: String, options: DocOptions = DocOptions()) throws -> Doc {
@@ -126,15 +188,32 @@ public final class Doc: @unchecked Sendable {
         let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
         let modified = (attrs[.modificationDate] as? Date) ?? Date()
 
-        let fg = try SQLiteConnection(path: resolvedPath, readOnly: true, immutable: options.isImmutable)
-
-        // Verify valid SQLite header via cheap pragma
-        guard let _ = try? fg.queryRow("PRAGMA journal_mode") else {
-            fg.close()
+        // Cheap, lock-free validity check: the file-format magic bytes. This is the
+        // authoritative "is this a SQLite file" answer — unlike a pragma probe, it
+        // can't be fooled by locking/permission failures into rejecting a real database.
+        guard Doc.hasSQLiteHeader(at: resolvedPath, size: size) else {
             throw SQLiteError.notADatabase(path: resolvedPath)
         }
 
-        let doc = Doc(path: resolvedPath, size: size, modified: modified, options: options, fg: fg)
+        var fg = try SQLiteConnection(path: resolvedPath, readOnly: true, immutable: options.isImmutable)
+        var effectiveOptions = options
+
+        if (try? fg.queryRow("PRAGMA journal_mode")) == nil {
+            // A WAL-mode database needs to create/open a -shm file to answer this,
+            // which fails on a read-only volume/directory or when the -wal/-shm
+            // sidecar files are missing. The header already proved this is a real
+            // SQLite file, so retry immutable — which needs no locking at all —
+            // before giving up on it.
+            fg.close()
+            guard let retried = try? SQLiteConnection(path: resolvedPath, readOnly: true, immutable: true),
+                  (try? retried.queryRow("PRAGMA journal_mode")) != nil else {
+                throw SQLiteError.notADatabase(path: resolvedPath)
+            }
+            fg = retried
+            effectiveOptions.isImmutable = true
+        }
+
+        let doc = Doc(path: resolvedPath, size: size, modified: modified, options: effectiveOptions, fg: fg)
         try doc.discover()
         doc.loadStyle()
         return doc
@@ -156,6 +235,7 @@ public final class Doc: @unchecked Sendable {
         self.counterWorker = CounterWorker()
         self.columnSampler = ColumnSampler()
         self.finder = Finder()
+        self.lastObservedStamp = Doc.diskStamp(for: path)
     }
 
     deinit {
@@ -338,8 +418,21 @@ public final class Doc: @unchecked Sendable {
                         s.customCSS = (s.customCSS ?? "") + "\n" + val
                     case "page_size", "pagesize":
                         if let n = Int(val), n > 0 { s.pageSize = n }
+                    case "columns":
+                        let list = val.split(whereSeparator: { $0 == "," || $0 == " " })
+                            .map { String($0).trimmingCharacters(in: .whitespaces) }
+                            .filter { !$0.isEmpty }
+                        if !list.isEmpty { s.tableColumns["*"] = list }
                     default:
-                        break
+                        if key.hasSuffix(".columns") {
+                            let tblPrefix = String(key.dropLast(".columns".count))
+                            let list = val.split(whereSeparator: { $0 == "," || $0 == " " })
+                                .map { String($0).trimmingCharacters(in: .whitespaces) }
+                                .filter { !$0.isEmpty }
+                            if !tblPrefix.isEmpty && !list.isEmpty {
+                                s.tableColumns[tblPrefix] = list
+                            }
+                        }
                     }
                 }
             }
@@ -359,8 +452,8 @@ public final class Doc: @unchecked Sendable {
                 let name = r[1].textValue ?? ""
                 let type = r[2].textValue ?? ""
                 let notNull = (r[3].intValue ?? 0) != 0
-                let pk = (r[5].intValue ?? 0) != 0
-                result.append(Column(name: name, type: type, notNull: notNull, pk: pk))
+                let pkNum = Int(r[5].intValue ?? 0)
+                result.append(Column(name: name, type: type, notNull: notNull, pk: pkNum != 0, pkIndex: pkNum))
             }
             return result
         }

@@ -121,10 +121,36 @@ extension Doc {
             isApprox = !exact
             withRowID = true
         } else {
-            // Views and WITHOUT ROWID tables
-            query = "SELECT \(colExpr) FROM \(ts.quoted) LIMIT ? OFFSET ?"
-            args = [limit, offset]
-            path = "offset"
+            // WITHOUT ROWID tables and views: use composite primary-key keyset seeking when available.
+            let pkCols = cols.filter { $0.pkIndex > 0 }.sorted { $0.pkIndex < $1.pkIndex }
+            if !pkCols.isEmpty {
+                let orderList = pkCols.map { "\(Doc.quoteIdent($0.name)) ASC" }.joined(separator: ", ")
+                if window.useAfter && window.afterPKValues.count == pkCols.count && !window.afterPKValues.contains(where: { $0.isNull }) {
+                    if pkCols.count == 1 {
+                        let k0 = Doc.quoteIdent(pkCols[0].name)
+                        query = "SELECT \(colExpr) FROM \(ts.quoted) WHERE \(k0) > ? ORDER BY \(orderList) LIMIT ?"
+                    } else {
+                        let tupleCols = pkCols.map { Doc.quoteIdent($0.name) }.joined(separator: ", ")
+                        let placeholders = Array(repeating: "?", count: pkCols.count).joined(separator: ", ")
+                        query = "SELECT \(colExpr) FROM \(ts.quoted) WHERE (\(tupleCols)) > (\(placeholders)) ORDER BY \(orderList) LIMIT ?"
+                    }
+                    args = window.afterPKValues.map { $0.bindable } + [limit]
+                    path = "pk-keyset"
+                } else if offset == 0 {
+                    query = "SELECT \(colExpr) FROM \(ts.quoted) ORDER BY \(orderList) LIMIT ?"
+                    args = [limit]
+                    path = "pk-keyset"
+                } else {
+                    query = "SELECT \(colExpr) FROM \(ts.quoted) ORDER BY \(orderList) LIMIT ? OFFSET ?"
+                    args = [limit, offset]
+                    path = "offset"
+                }
+            } else {
+                // Views without declared PKs
+                query = "SELECT \(colExpr) FROM \(ts.quoted) LIMIT ? OFFSET ?"
+                args = [limit, offset]
+                path = "offset"
+            }
         }
 
         let rawRows = try fg.query(query, args: args)

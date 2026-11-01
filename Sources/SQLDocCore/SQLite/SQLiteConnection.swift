@@ -166,6 +166,98 @@ public final class SQLiteConnection: @unchecked Sendable {
         }
     }
 
+    /// Executes a single-row query with a hard wall-clock time budget (in milliseconds)
+    /// enforced via `sqlite3_progress_handler`. Returns `nil` if the budget expires,
+    /// preventing background `COUNT(*)` scans on 20 GB tables or heavy views from thrashing disk I/O.
+    public func queryRowWithTimeout(_ sql: String, args: [Any] = [], maxMillis: Int) -> [SQLiteValue]? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let db else { return nil }
+
+        var deadlineNano = DispatchTime.now().uptimeNanoseconds &+ (UInt64(max(1, maxMillis)) &* 1_000_000)
+        return withUnsafeMutablePointer(to: &deadlineNano) { deadlinePtr in
+            sqlite3_progress_handler(
+                db,
+                10_000,
+                { ctx -> Int32 in
+                    guard let ptr = ctx?.assumingMemoryBound(to: UInt64.self) else { return 0 }
+                    return DispatchTime.now().uptimeNanoseconds > ptr.pointee ? 1 : 0
+                },
+                deadlinePtr
+            )
+            defer {
+                sqlite3_progress_handler(db, 0, nil, nil)
+            }
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+                return nil
+            }
+            defer { sqlite3_finalize(stmt) }
+
+            guard (try? bindArgs(stmt: stmt, args: args)) != nil else { return nil }
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+
+            let colCount = sqlite3_column_count(stmt)
+            var row: [SQLiteValue] = []
+            row.reserveCapacity(Int(colCount))
+            for i in 0..<colCount {
+                row.append(readColumn(stmt: stmt, index: i))
+            }
+            return row
+        }
+    }
+
+    /// Executes a multi-row query with a hard wall-clock time budget (in milliseconds)
+    /// enforced via `sqlite3_progress_handler`. Returns `nil` if the budget expires.
+    public func queryWithTimeout(_ sql: String, args: [Any] = [], maxMillis: Int) -> [[SQLiteValue]]? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let db else { return nil }
+
+        var deadlineNano = DispatchTime.now().uptimeNanoseconds &+ (UInt64(max(1, maxMillis)) &* 1_000_000)
+        return withUnsafeMutablePointer(to: &deadlineNano) { deadlinePtr in
+            sqlite3_progress_handler(
+                db,
+                10_000,
+                { ctx -> Int32 in
+                    guard let ptr = ctx?.assumingMemoryBound(to: UInt64.self) else { return 0 }
+                    return DispatchTime.now().uptimeNanoseconds > ptr.pointee ? 1 : 0
+                },
+                deadlinePtr
+            )
+            defer {
+                sqlite3_progress_handler(db, 0, nil, nil)
+            }
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+                return nil
+            }
+            defer { sqlite3_finalize(stmt) }
+
+            guard (try? bindArgs(stmt: stmt, args: args)) != nil else { return nil }
+
+            let colCount = sqlite3_column_count(stmt)
+            var rows: [[SQLiteValue]] = []
+            while true {
+                let stepRc = sqlite3_step(stmt)
+                if stepRc == SQLITE_ROW {
+                    var row: [SQLiteValue] = []
+                    row.reserveCapacity(Int(colCount))
+                    for i in 0..<colCount {
+                        row.append(readColumn(stmt: stmt, index: i))
+                    }
+                    rows.append(row)
+                } else if stepRc == SQLITE_DONE {
+                    return rows
+                } else {
+                    return nil
+                }
+            }
+        }
+    }
+
     /// Executes a streaming query, invoking a row callback for each row without buffering everything in memory.
     public func queryStreaming(_ sql: String, args: [Any] = [], onRow: (Int64, [SQLiteValue]) throws -> Bool) throws {
         lock.lock()

@@ -9,17 +9,17 @@ public enum AppIdentity {
     /// CFBundleVersion / build metadata
     public static let build = "3"
     /// Primary macOS + UTI reverse-DNS prefix
-    public static let bundleId = "com.mavgo.sqldoc"
-    /// Nested native-window bundle (Go sqldoc-view)
-    public static let bundleIdViewer = "com.mavgo.sqldoc.viewer"
+    public static let bundleId = "com.mavgo.sqlswift"
+    /// Nested native-window bundle
+    public static let bundleIdViewer = "com.mavgo.sqlswift.viewer"
     /// macOS LSApplicationCategoryType
     public static let category = "public.app-category.developer-tools"
     /// Installed CLI binary name
-    public static let cliName = "sqldoc"
+    public static let cliName = "sqlswift"
     /// NSHumanReadableCopyright
     public static let copyright = "(c) 2026 Darian Hickman"
     /// macOS CFBundleDisplayName / Finder / Dock
-    public static let displayName = "sqldoc"
+    public static let displayName = "SqlSwift"
     /// File extensions the app claims
     public static let docExtensions = "db,sqlite,sqlite3,db3,s3db,sl3"
     /// LSHandlerRank for the SwiftUI app (do not seize the type)
@@ -27,7 +27,7 @@ public enum AppIdentity {
     /// CFBundleTypeName / UTTypeDescription
     public static let docTypeName = "SQLite database"
     /// Exported UTI for the document type
-    public static let docUti = "com.mavgo.sqldoc.sqlite"
+    public static let docUti = "com.mavgo.sqlswift.sqlite"
     /// About box, manifest, .desktop
     public static let homepage = "https://github.com/darianmavgo/sqlswift"
     /// Pre-rendered macOS icon, committed as-is; `make app` copies it into the bundle
@@ -37,7 +37,7 @@ public enum AppIdentity {
     /// LSMinimumSystemVersion for the SwiftUI app; also the Package.swift platform floor
     public static let macosMinVersion = "14.0"
     /// Short name: macOS CFBundleName / menu bar, CLI binary, meta[application-name]
-    public static let name = "sqldoc"
+    public static let name = "SqlSwift"
     /// One-liner: .desktop Comment, manifest description, about box
     public static let tagline = "A read-only viewer for SQLite."
     /// Longer line under the start-page wordmark
@@ -51,5 +51,5 @@ public enum AppIdentity {
     /// Window / browser-tab title; {document} = _style.title or filename
     public static let windowTitleFormat = "{document} — {app}"
     /// Text shown as the start-page heading
-    public static let wordmark = "sqldoc"
+    public static let wordmark = "SqlSwift"
 }

@@ -127,9 +127,9 @@ extension Doc {
         case .text(let s):
             text = s
         case .integer(let v):
-            text = String(v)
+            text = SQLiteValueFormat.integerString(v)
         case .real(let v):
-            text = String(v)
+            text = SQLiteValueFormat.realString(v)
         }
         if text.count > maxLen {
             return String(text.prefix(maxLen))

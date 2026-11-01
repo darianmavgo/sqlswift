@@ -21,13 +21,37 @@ public struct CellInspectInfo: Identifiable, @unchecked Sendable {
     }
 }
 
+public enum FolderSortOrder: String, CaseIterable, Sendable {
+    case folder = "By Folder"
+    case modified = "Newest"
+    case size = "Largest"
+    case name = "Name"
+}
+
 @MainActor
 public final class AppViewModel: ObservableObject {
     @Published public var activeDocEntry: DocEntry?
     @Published public var openDocuments: [DocEntry] = []
     @Published public var recentItems: [RecentItem] = []
-    @Published public var selectedTableName: String = ""
-    @Published public var isGalleryView: Bool = false
+    @Published public var workspaceItems: [RecentItem] = []
+    @Published public var selectedTableName: String = "" {
+        didSet { saveHotReloadSession() }
+    }
+    @Published public var isFolderBrowserVisible: Bool = false {
+        didSet { saveHotReloadSession() }
+    }
+    @Published public var currentFolderPath: String = "" {
+        didSet { saveHotReloadSession() }
+    }
+    @Published public var folderFiles: [SQLiteFileEntry] = []
+    @Published public var folderSummaries: [FolderSummary] = []
+    @Published public var selectedSubfolder: String? = nil {
+        didSet { saveHotReloadSession() }
+    }
+    @Published public var folderSearchQuery: String = ""
+    @Published public var folderSortOrder: FolderSortOrder = .folder
+    @Published public var extraQueryParams: [String] = []
+    @Published public var isScanningFolder: Bool = false
     @Published public var isFindBarVisible: Bool = false
     @Published public var zoomScale: Double = 1.0
     @Published public var errorMessage: String? = nil
@@ -54,8 +78,7 @@ public final class AppViewModel: ObservableObject {
     @Published public var showSchemaSheet: Bool = false
     @Published public var showQueryConsole: Bool = false
     @Published public var showJumpToRow: Bool = false
-    @Published public var showSidebar: Bool = false
-    @Published public var showFilterBar: Bool = false
+    @Published public var showSidebar: Bool = true
 
     // Selection state
     @Published public var selectedCell: (row: Int, col: Int)? = nil
@@ -64,17 +87,107 @@ public final class AppViewModel: ObservableObject {
     // Banquet Bar state
     @Published public var isBanquetBarEditing: Bool = false
     @Published public var banquetBarText: String = ""
+    @Published public var banquetBarPendingPaste: String? = nil
     @Published public var banquetCopiedFeedback: Bool = false
     @Published public var pendingBanquet: Banquet? = nil
+    @Published public var pendingDrillDown: (table: String, filters: [ColumnFilter])? = nil
+
+    /// Switches to `targetTable` in the current document and applies `filters` (1-click relational drill-down).
+    public func drillDown(toTable targetTable: String, filters: [ColumnFilter]) {
+        self.pendingDrillDown = (table: targetTable, filters: filters)
+        self.isFolderBrowserVisible = false
+        self.selectedTableName = targetTable
+    }
 
     public let session = SessionManager.shared
     public let recents = RecentsManager.shared
     public let persistence = StatePersistenceManager.shared
 
+    private var isRestoringSession = false
+
     public init() {
         self.themeMode = persistence.themeMode
         self.zoomScale = persistence.zoomScale
         refreshSession()
+        restoreHotReloadSession()
+    }
+
+    private func saveHotReloadSession() {
+        guard !isRestoringSession else { return }
+        let defaults = UserDefaults.standard
+        defaults.set(currentFolderPath, forKey: "sqldoc.hotReload.folderPath")
+        defaults.set(selectedSubfolder, forKey: "sqldoc.hotReload.subfolder")
+        defaults.set(activeDocEntry?.path, forKey: "sqldoc.hotReload.docPath")
+        defaults.set(selectedTableName, forKey: "sqldoc.hotReload.tableName")
+        defaults.set(isFolderBrowserVisible, forKey: "sqldoc.hotReload.isFolderBrowserVisible")
+    }
+
+    private func restoreHotReloadSession() {
+        isRestoringSession = true
+        defer { isRestoringSession = false }
+
+        let defaults = UserDefaults.standard
+        let savedFolder = defaults.string(forKey: "sqldoc.hotReload.folderPath") ?? ""
+        let savedSubfolder = defaults.string(forKey: "sqldoc.hotReload.subfolder")
+        let savedDocPath = defaults.string(forKey: "sqldoc.hotReload.docPath") ?? ""
+        let savedTable = defaults.string(forKey: "sqldoc.hotReload.tableName") ?? ""
+        let savedFolderVisible = defaults.object(forKey: "sqldoc.hotReload.isFolderBrowserVisible") as? Bool
+
+        if !savedDocPath.isEmpty && FileManager.default.fileExists(atPath: savedDocPath) && !FolderScanner.isDirectory(savedDocPath) {
+            open(path: savedDocPath, targetTable: savedTable.isEmpty ? nil : savedTable)
+            self.isFolderBrowserVisible = savedFolderVisible ?? false
+            if !savedFolder.isEmpty && FolderScanner.isDirectory(savedFolder) {
+                openFolder(path: savedFolder, selectSubfolder: savedSubfolder, showBrowser: savedFolderVisible ?? false)
+            }
+        } else if !savedFolder.isEmpty && FolderScanner.isDirectory(savedFolder) {
+            openFolder(path: savedFolder, selectSubfolder: savedSubfolder, showBrowser: true)
+        }
+    }
+
+    public static func defaultStartingFolder() -> String {
+        ""
+    }
+
+    public static func quickFolders() -> [(label: String, path: String)] {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser.path
+        let raw: [(String, String)] = [
+            ("trade_well / data", "\(home)/Documents/trade_well/backtestgosqlite/data"),
+            ("trade_well / reports", "\(home)/Documents/trade_well/backtestgosqlite/data/reports"),
+            ("view_sqlite", "\(home)/Documents/view_sqlite"),
+            ("Documents", "\(home)/Documents")
+        ]
+        return raw.filter { fm.fileExists(atPath: $0.1) }
+    }
+
+    public func openFolder(path: String, selectSubfolder: String? = nil, showBrowser: Bool = true) {
+        let resolved = FolderScanner.resolveLocalPath(path)
+        guard FolderScanner.isDirectory(resolved) else {
+            errorMessage = "Cannot find folder at '\(path)'"
+            return
+        }
+        self.currentFolderPath = resolved
+        self.selectedSubfolder = selectSubfolder
+        if showBrowser {
+            self.isFolderBrowserVisible = true
+        }
+        self.errorMessage = nil
+        self.isScanningFolder = true
+
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let scanned = FolderScanner.scan(rootPath: resolved, maxDepth: 6, inspectSchema: true)
+            await MainActor.run {
+                guard let self, self.currentFolderPath == resolved else { return }
+                self.folderFiles = scanned.files
+                self.folderSummaries = scanned.folders
+                self.isScanningFolder = false
+            }
+        }
+    }
+
+    public func refreshCurrentFolder() {
+        guard !currentFolderPath.isEmpty else { return }
+        openFolder(path: currentFolderPath, selectSubfolder: selectedSubfolder, showBrowser: isFolderBrowserVisible)
     }
 
     public var effectiveColorScheme: ColorScheme? {
@@ -95,24 +208,80 @@ public final class AppViewModel: ObservableObject {
     public func refreshSession() {
         self.openDocuments = session.list()
         self.recentItems = recents.getRecents()
+        if workspaceItems.isEmpty {
+            self.workspaceItems = Self.discoverWorkspaceDatabases()
+        }
         if activeDocEntry == nil, let first = session.first() {
             setActiveDocument(first)
         }
     }
 
-    public func open(path: String, isImmutable: Bool = false) {
+    private static func discoverWorkspaceDatabases() -> [RecentItem] {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser.path
+        let candidateRoots = [
+            "\(home)/Documents/trade_well/backtestgosqlite/data",
+            "\(home)/Documents/view_sqlite"
+        ]
+        var found: [RecentItem] = []
+        var seen = Set<String>()
+
+        for root in candidateRoots where fm.fileExists(atPath: root) {
+            guard let enumerator = fm.enumerator(
+                at: URL(fileURLWithPath: root),
+                includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else { continue }
+
+            for case let url as URL in enumerator {
+                let ext = url.pathExtension.lowercased()
+                guard ["db", "sqlite", "sqlite3"].contains(ext) else { continue }
+                let path = url.path
+                if path.contains("/.build/") || path.contains("/testdata/") || path.hasSuffix("/sqldoc.db") {
+                    continue
+                }
+                guard seen.insert(path).inserted else { continue }
+                let vals = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+                let size = Int64(vals?.fileSize ?? 0)
+                let modified = vals?.contentModificationDate ?? Date.distantPast
+                // Build a friendly relative label when inside a subfolder like reports/4/rotation.db
+                let displayName: String
+                if path.hasPrefix(root + "/") {
+                    displayName = String(path.dropFirst(root.count + 1))
+                } else {
+                    displayName = url.lastPathComponent
+                }
+                found.append(RecentItem(path: path, name: displayName, size: size, lastOpened: modified))
+            }
+        }
+        return found.sorted { $0.lastOpened > $1.lastOpened }
+    }
+
+    public func open(path: String, isImmutable: Bool = false, targetTable: String? = nil) {
+        let resolved = FolderScanner.resolveLocalPath(path)
+        if FolderScanner.isDirectory(resolved) {
+            openFolder(path: resolved, showBrowser: true)
+            return
+        }
+
         do {
-            let entry = try session.open(path: path, options: DocOptions(isImmutable: isImmutable))
+            let entry = try session.open(path: resolved, options: DocOptions(isImmutable: isImmutable))
             refreshSession()
-            setActiveDocument(entry)
+            setActiveDocument(entry, preferredTable: targetTable)
+            self.isFolderBrowserVisible = false
+            // If currentFolderPath isn't an ancestor of this file, scan the file's parent folder for the sidebar
+            let parentDir = (resolved as NSString).deletingLastPathComponent
+            if currentFolderPath.isEmpty || !resolved.hasPrefix(currentFolderPath) {
+                openFolder(path: parentDir, showBrowser: false)
+            }
             errorMessage = nil
         } catch {
             // Not a SQLite file? Try converting a plain-text format we understand.
-            if FileImporter.canImport(path: path) {
-                importAndOpen(path: path)
+            if FileImporter.canImport(path: resolved) {
+                importAndOpen(path: resolved)
                 return
             }
-            let ext = (path as NSString).pathExtension.lowercased()
+            let ext = (resolved as NSString).pathExtension.lowercased()
             if ["xlsx", "xls", "pdf"].contains(ext) {
                 errorMessage = ".\(ext) import isn't supported yet — convert it to CSV or SQLite first."
                 return
@@ -159,43 +328,44 @@ public final class AppViewModel: ObservableObject {
         let pb = NSPasteboard.general
 
         // 1. Try file URLs from pasteboard
-        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], let firstURL = urls.first {
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           let firstURL = urls.first,
+           firstURL.isFileURL,
+           FileManager.default.fileExists(atPath: firstURL.path) {
             open(url: firstURL)
             return
         }
 
-        // 2. Try string content
-        if let string = pb.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), !string.isEmpty {
-            var path = string
-            // Handle file:// URIs
-            if path.hasPrefix("file://"), let url = URL(string: path) {
-                path = url.path
-            }
-            // Strip wrapping quotes
-            if (path.hasPrefix("\"") && path.hasSuffix("\"")) || (path.hasPrefix("'") && path.hasSuffix("'")) {
-                path = String(path.dropFirst().dropLast())
-            }
-            let expanded = (path as NSString).expandingTildeInPath
-            if FileManager.default.fileExists(atPath: expanded) {
-                open(path: expanded)
+        // 2. Try string content: if it's a local file/folder, open it; otherwise paste into Banquet bar for editing!
+        if let rawString = pb.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), !rawString.isEmpty {
+            let singleLine = rawString
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+            let resolved = FolderScanner.resolveLocalPath(singleLine)
+            if FileManager.default.fileExists(atPath: resolved) {
+                open(path: resolved)
                 return
             } else {
-                errorMessage = "Cannot open pasted path: File not found at '\(path)'"
+                banquetBarPendingPaste = singleLine
+                isBanquetBarEditing = true
                 return
             }
         }
-
-        errorMessage = "Clipboard does not contain a valid database file path."
     }
 
-    public func setActiveDocument(_ entry: DocEntry) {
+    public func setActiveDocument(_ entry: DocEntry, preferredTable: String? = nil) {
         self.activeDocEntry = entry
         let visibleTables = entry.doc.tables.filter { !$0.hidden }
-        let defaultTable = visibleTables.first?.name ?? entry.doc.tables.first?.name ?? ""
-        self.selectedTableName = defaultTable
-        self.isGalleryView = false
-        self.selectedCell = nil
-        self.selectedRowIndex = nil
+        if let pref = preferredTable, entry.doc.tables.contains(where: { $0.name == pref }) {
+            self.selectedTableName = pref
+        } else {
+            self.selectedTableName = visibleTables.first?.name ?? entry.doc.tables.first?.name ?? ""
+        }
+        self.isFolderBrowserVisible = false
+        self.selectedCell = (0, 0)
+        self.selectedRowIndex = 0
         self.inspectingCell = nil
     }
 
@@ -228,14 +398,28 @@ public final class AppViewModel: ObservableObject {
     public func showOpenPanel() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = true
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [.data]
+        panel.prompt = "Open"
+        panel.message = "Choose a SQLite file (.db, .sqlite) or a folder to browse all SQLite files inside it."
 
         if panel.runModal() == .OK {
             for url in panel.urls {
                 open(url: url)
             }
+        }
+    }
+
+    public func showOpenFolderPanel() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = "Browse Folder"
+        panel.message = "Choose a folder to list all SQLite databases inside it."
+
+        if panel.runModal() == .OK, let url = panel.url {
+            openFolder(path: url.path, showBrowser: true)
         }
     }
 
@@ -309,10 +493,25 @@ public final class AppViewModel: ObservableObject {
         let sortCol = tableVM?.sortColumn
         let isSortDesc = tableVM?.isSortDesc ?? false
         let filters = tableVM?.filters
-        let offset = tableVM?.currentOffset
-        let limit = tableVM?.pageLimit
+        let offset = tableVM?.currentOffset ?? 0
+        let limit = tableVM?.pageLimit ?? 100
 
-        // Build where clause from filters
+        // Preserve explicit column projection if set via Banquet or manual column hiding
+        let selectCols: [String]
+        if let tableVM {
+            if !tableVM.hiddenColumns.isEmpty {
+                let visible = tableVM.columns.filter { !tableVM.hiddenColumns.contains($0.name) }.map(\.name)
+                selectCols = visible.isEmpty ? ["*"] : visible
+            } else if tableVM.banquetSelect != ["*"] && !tableVM.banquetSelect.isEmpty {
+                selectCols = tableVM.banquetSelect
+            } else {
+                selectCols = ["*"]
+            }
+        } else {
+            selectCols = ["*"]
+        }
+
+        // Build where clause from filters (or preserve raw whereClause from Banquet URL)
         let whereClause: String?
         if let filters, !filters.isEmpty {
             let clauses = filters.compactMap { filter -> String? in
@@ -337,25 +536,104 @@ public final class AppViewModel: ObservableObject {
                     return "\(col) IS NOT NULL"
                 }
             }
-            whereClause = clauses.isEmpty ? nil : clauses.joined(separator: " AND ")
+            whereClause = clauses.isEmpty ? tableVM?.banquetWhereClause : clauses.joined(separator: " AND ")
         } else {
-            whereClause = nil
+            whereClause = tableVM?.banquetWhereClause
         }
+
+        let extraParams = (tableVM?.extraQueryParams.isEmpty == false)
+            ? (tableVM?.extraQueryParams ?? [])
+            : self.extraQueryParams
 
         return Banquet(
             dataSetPath: dataset,
             table: table,
-            select: ["*"],
+            select: selectCols,
             sortColumn: sortCol,
             isSortDesc: isSortDesc,
             whereClause: whereClause,
             limit: limit,
-            offset: offset.map { Int($0) }
+            offset: Int(offset),
+            groupBy: tableVM?.banquetGroupBy,
+            having: tableVM?.banquetHaving,
+            extraQueryParams: extraParams,
+            rawQuery: tableVM?.rawQuery ?? ""
         )
+    }
+
+    // MARK: - Banquet-Driven Pagination
+
+    /// Executes a Banquet URL query with an updated `[offset : offset + limit]` slice.
+    public func executeBanquetSlice(offset: Int64, limit: Int? = nil, tableVM: TableViewModel) {
+        var b = banquet(for: tableVM)
+        let pageLen = limit ?? tableVM.pageLimit
+        b.offset = Int(max(0, offset))
+        b.limit = pageLen
+        let url = BanquetSerializer.canonicalString(for: b)
+        openBanquet(urlString: url, activeTableVM: tableVM)
+    }
+
+    public func paginateFirst(tableVM: TableViewModel) {
+        executeBanquetSlice(offset: 0, limit: tableVM.pageLimit, tableVM: tableVM)
+    }
+
+    public func paginatePrevious(tableVM: TableViewModel) {
+        let prevOffset = max(0, tableVM.currentOffset - Int64(tableVM.pageLimit))
+        executeBanquetSlice(offset: prevOffset, limit: tableVM.pageLimit, tableVM: tableVM)
+    }
+
+    public func paginateNext(tableVM: TableViewModel) {
+        let step = Int64(tableVM.currentPage?.rows.count ?? tableVM.pageLimit)
+        let nextOffset = tableVM.currentOffset + max(1, step)
+        executeBanquetSlice(offset: nextOffset, limit: tableVM.pageLimit, tableVM: tableVM)
+    }
+
+    public func paginateLast(tableVM: TableViewModel) {
+        let total = !tableVM.filters.isEmpty
+            ? tableVM.filteredCount
+            : (tableVM.tableCount.known ? tableVM.tableCount.rows : nil)
+        if let total, total > 0 {
+            let lastOffset = max(0, total - Int64(tableVM.pageLimit))
+            executeBanquetSlice(offset: lastOffset, limit: tableVM.pageLimit, tableVM: tableVM)
+        } else {
+            paginateNext(tableVM: tableVM)
+        }
     }
 
     /// Returns the canonical Banquet URL string for the current view.
     public func banquetURLString(for tableVM: TableViewModel?) -> String {
+        if isFolderBrowserVisible || activeDocEntry == nil {
+            var url = currentFolderPath
+            if let sub = selectedSubfolder, !sub.isEmpty {
+                url += "/" + sub
+            }
+            url += "/databases"
+            switch folderSortOrder {
+            case .size:
+                url += "/-size_bytes"
+            case .modified:
+                url += "/-modified"
+            case .name:
+                url += "/+name"
+            case .folder:
+                break
+            }
+            var qParams: [String] = []
+            let q = folderSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !q.isEmpty {
+                qParams.append("where=\(q)")
+            }
+            for extra in extraQueryParams {
+                let trimmed = extra.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty && !qParams.contains(trimmed) {
+                    qParams.append(trimmed)
+                }
+            }
+            if !qParams.isEmpty {
+                url += "?" + qParams.joined(separator: "&")
+            }
+            return url
+        }
         let b = banquet(for: tableVM)
         return BanquetSerializer.canonicalString(for: b)
     }
@@ -377,10 +655,21 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
-    /// Navigates to a Banquet URL: resolves dataset path, table, sort, and filters.
+    /// Navigates to a Banquet URL or local file/folder path: resolves dataset path, folder, table, sort, and filters.
     public func openBanquet(urlString: String, activeTableVM: TableViewModel? = nil) {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        // Direct check: if the user typed or pasted a folder path or file path directly, open it immediately!
+        let directPath = FolderScanner.resolveLocalPath(trimmed)
+        if FolderScanner.isDirectory(directPath) {
+            openFolder(path: directPath, showBrowser: true)
+            return
+        }
+        if FileManager.default.fileExists(atPath: directPath) {
+            open(path: directPath)
+            return
+        }
 
         do {
             let b = try BanquetParser.parse(trimmed)
@@ -393,32 +682,86 @@ public final class AppViewModel: ObservableObject {
     /// Applies a parsed `Banquet` query onto the application state.
     public func applyBanquet(_ b: Banquet, activeTableVM: TableViewModel? = nil) {
         self.pendingBanquet = b
+        self.extraQueryParams = b.extraQueryParams
 
-        // 1. Open or select dataset if specified
+        // 1. Check if this is a Folder Collection query (e.g. data/databases, data/reports/1/oos/databases/-size_bytes?where=markov)
+        let isKnownDB = b.dataSetPath.hasSuffix(".db") || b.dataSetPath.hasSuffix(".sqlite") || b.dataSetPath.hasSuffix(".sqlite3")
+        if b.isCollection || b.table == "databases" || (b.table == "tables" && !isKnownDB) {
+            let targetPath = b.dataSetPath.isEmpty ? currentFolderPath : FolderScanner.resolveLocalPath(b.dataSetPath)
+            var rootFolder = currentFolderPath
+            var subfolder: String? = nil
+
+            if FolderScanner.isDirectory(targetPath) {
+                if !currentFolderPath.isEmpty && targetPath.hasPrefix(currentFolderPath) && targetPath != currentFolderPath {
+                    subfolder = String(targetPath.dropFirst(currentFolderPath.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                } else {
+                    rootFolder = targetPath
+                }
+            }
+
+            // Map collection sort
+            if let sc = b.sortColumn?.lowercased() {
+                if sc.contains("size") {
+                    folderSortOrder = .size
+                } else if sc.contains("mod") || sc.contains("date") || sc.contains("time") {
+                    folderSortOrder = .modified
+                } else if sc.contains("name") {
+                    folderSortOrder = .name
+                } else {
+                    folderSortOrder = .folder
+                }
+            }
+
+            // Map collection filter / search
+            if let w = b.whereClause, !w.isEmpty {
+                folderSearchQuery = w
+            }
+
+            openFolder(path: rootFolder, selectSubfolder: subfolder, showBrowser: true)
+            self.isFolderBrowserVisible = true
+            self.pendingBanquet = nil
+            return
+        }
+
+        // 2. Open or select database file if specified
         if !b.dataSetPath.isEmpty {
-            let path = (b.dataSetPath as NSString).expandingTildeInPath
-            if let current = activeDocEntry, current.doc.path == path || (current.doc.path as NSString).lastPathComponent == b.dataSetPath {
-                // Dataset matches current open doc
-            } else if let existing = openDocuments.first(where: { $0.doc.path == path || ($0.doc.path as NSString).lastPathComponent == b.dataSetPath }) {
+            let resolved = FolderScanner.resolveLocalPath(b.dataSetPath)
+            if FolderScanner.isDirectory(resolved) {
+                openFolder(path: resolved, showBrowser: true)
+                self.isFolderBrowserVisible = true
+                self.pendingBanquet = nil
+                return
+            }
+            if let current = activeDocEntry, current.doc.path == resolved || (current.doc.path as NSString).lastPathComponent == b.dataSetPath {
+                self.isFolderBrowserVisible = false
+            } else if let existing = openDocuments.first(where: { $0.doc.path == resolved || ($0.doc.path as NSString).lastPathComponent == b.dataSetPath }) {
                 setActiveDocument(existing)
-            } else if FileManager.default.fileExists(atPath: path) {
-                open(path: path)
+            } else if FileManager.default.fileExists(atPath: resolved) {
+                open(path: resolved)
             } else {
-                errorMessage = "Cannot find database file at '\(b.dataSetPath)'"
+                errorMessage = "Cannot find database or folder at '\(resolved)'"
                 return
             }
         }
 
-        // 2. Select table if specified
+        // 3. Database Overview (tables or empty table name)
+        if b.table == "tables" || b.table.isEmpty {
+            self.isFolderBrowserVisible = false
+            self.pendingBanquet = nil
+            return
+        }
+
+        // 4. Select table if specified
         if !b.table.isEmpty, let entry = activeDocEntry {
             if entry.doc.tables.contains(where: { $0.name == b.table }) {
+                self.isFolderBrowserVisible = false
                 if self.selectedTableName != b.table {
                     self.selectedTableName = b.table
                 }
             }
         }
 
-        // 3. Apply sort, filters, columns, slice clauses onto the table view model
+        // 5. Apply sort, filters, columns, slice clauses onto the table view model
         let targetTable = b.table.isEmpty ? selectedTableName : b.table
         if let vm = activeTableVM, vm.tableName == targetTable {
             vm.applyBanquet(b)

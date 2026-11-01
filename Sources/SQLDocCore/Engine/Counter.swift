@@ -42,6 +42,14 @@ public final class CounterWorker: @unchecked Sendable {
         activeTasks[tableName] = task
         lock.unlock()
     }
+
+    public func reset() {
+        lock.lock()
+        for (_, task) in activeTasks { task.cancel() }
+        activeTasks.removeAll()
+        counts.removeAll()
+        lock.unlock()
+    }
 }
 
 extension Doc {
@@ -118,16 +126,21 @@ extension Doc {
         }
         guard !clauses.isEmpty else { return nil }
         let sql = "SELECT COUNT(*) FROM \(Doc.quoteIdent(tableName)) WHERE \(clauses.joined(separator: " AND "))"
-        return (try? bg.queryRow(sql, args: args))?.first?.intValue
+        return bg.queryRowWithTimeout(sql, args: args, maxMillis: 600)?.first?.intValue
     }
 
     private func runExactCount(for tableName: String) async {
         // Yield to foreground queries
         await waitIdle()
 
-        guard let _ = table(named: tableName) else { return }
+        guard let t = table(named: tableName) else { return }
+        // Bound background COUNT(*) time so 20 GB tables (which already have an O(1)
+        // rowid-bounds estimate) and expensive multi-stage window-function views never
+        // thrash disk or CPU in the background.
+        let budgetMs = t.isView ? 350 : 750
         let q = "SELECT COUNT(*) FROM \(Doc.quoteIdent(tableName))"
-        guard let row = try? bg.queryRow(q), let countVal = row.first?.intValue else {
+        guard let row = bg.queryRowWithTimeout(q, maxMillis: budgetMs),
+              let countVal = row.first?.intValue else {
             return
         }
 

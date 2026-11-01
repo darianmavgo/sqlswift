@@ -31,6 +31,8 @@ public struct Banquet: Sendable, Equatable {
     public var groupBy: String?
     /// HAVING clause.
     public var having: String?
+    /// Extra or custom query parameters (e.g. `hmm-calmdown-qqq`, `foo=bar`).
+    public var extraQueryParams: [String]
     /// Remaining query string if any.
     public var rawQuery: String
     /// The original raw URL string.
@@ -51,6 +53,7 @@ public struct Banquet: Sendable, Equatable {
         offset: Int? = nil,
         groupBy: String? = nil,
         having: String? = nil,
+        extraQueryParams: [String] = [],
         rawQuery: String = "",
         rawURL: String = ""
     ) {
@@ -68,6 +71,7 @@ public struct Banquet: Sendable, Equatable {
         self.offset = offset
         self.groupBy = groupBy
         self.having = having
+        self.extraQueryParams = extraQueryParams
         self.rawQuery = rawQuery
         self.rawURL = rawURL
     }

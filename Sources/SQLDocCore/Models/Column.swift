@@ -7,13 +7,16 @@ public struct Column: Identifiable, Equatable, Hashable, Codable, Sendable {
     public let type: String
     public let notNull: Bool
     public let pk: Bool
+    /// 1-based position within the table's PRIMARY KEY (from `PRAGMA table_info`), or 0 if not part of the PK.
+    public let pkIndex: Int
     public let isNumeric: Bool
 
-    public init(name: String, type: String, notNull: Bool = false, pk: Bool = false) {
+    public init(name: String, type: String, notNull: Bool = false, pk: Bool = false, pkIndex: Int? = nil) {
         self.name = name
         self.type = type
         self.notNull = notNull
         self.pk = pk
+        self.pkIndex = pkIndex ?? (pk ? 1 : 0)
         
         let upper = type.uppercased()
         self.isNumeric = upper.contains("INT") ||

@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "sqldoc",
+    name: "SqlSwift",
     platforms: [
         .macOS(.v14)
     ],
@@ -12,11 +12,11 @@ let package = Package(
             targets: ["SQLDocCore"]
         ),
         .executable(
-            name: "sqldoc",
+            name: "sqlswift",
             targets: ["SQLDocCLI"]
         ),
         .executable(
-            name: "SQLDocApp",
+            name: "SqlSwiftApp",
             targets: ["SQLDocApp"]
         ),
         .executable(

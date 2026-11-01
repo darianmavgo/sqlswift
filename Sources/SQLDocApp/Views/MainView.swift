@@ -19,16 +19,25 @@ public struct MainView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Banquet Address Bar
-            BanquetBarView(appVM: appVM, activeTableVM: activeTableVM, palette: palette)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+            // Unified Title Bar + Banquet Toolbar (Browser / Xcode Style)
+            HStack(spacing: 8) {
+                BanquetBarView(appVM: appVM, activeTableVM: activeTableVM, palette: palette)
+                if appVM.isFindBarVisible, let activeTableVM {
+                    FindBarView(tableVM: activeTableVM) {
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            appVM.isFindBarVisible = false
+                            activeTableVM.cancelFind()
+                        }
+                    }
+                    .transition(.opacity)
+                }
+            }
+                .padding(.leading, 76) // Clear macOS traffic lights (🔴 🟡 🟢)
+                .padding(.trailing, 10)
+                .padding(.top, 5)
+                .padding(.bottom, 6)
                 .background(Color(NSColor.windowBackgroundColor))
                 .overlay(Divider(), alignment: .bottom)
-
-            if let activeTableVM, appVM.showFilterBar, !appVM.isGalleryView {
-                FilterBarView(tableVM: activeTableVM, palette: palette)
-            }
 
             HStack(spacing: 0) {
                 if appVM.showSidebar, appVM.activeDocEntry != nil {
@@ -38,10 +47,11 @@ public struct MainView: View {
             }
 
             // Status Bar
-            if let activeTableVM {
+            if let activeTableVM, !appVM.isFolderBrowserVisible {
                 StatusBarView(appVM: appVM, tableVM: activeTableVM)
             }
         }
+        .ignoresSafeArea(.container, edges: .top)
         .accentColor(appVM.activeDocEntry != nil ? AppTheme.color(from: appVM.activeDocEntry!.doc.style.accent) : Color.accentColor)
         .preferredColorScheme(appVM.effectiveColorScheme)
         .onAppear { syncActiveTableVM() }
@@ -87,25 +97,21 @@ public struct MainView: View {
     private var contentArea: some View {
         ZStack {
             ZStack {
-                if appVM.activeDocEntry != nil {
-                    if appVM.isGalleryView {
-                        GalleryView(appVM: appVM)
-                    } else if let activeTableVM {
-                        VirtualizedGridView(appVM: appVM, tableVM: activeTableVM)
-                    } else if appVM.activeDocEntry?.doc.tables.isEmpty == true {
-                        VStack(spacing: 12) {
-                            Image(systemName: "tray")
-                                .font(.system(size: 38))
-                                .foregroundColor(.secondary)
-                            Text("This database has no tables or views.")
-                                .font(.system(size: 13))
-                                .foregroundColor(.secondary)
-                        }
-                    } else {
-                        ProgressView("Loading schema…")
+                if appVM.isFolderBrowserVisible || appVM.activeDocEntry == nil {
+                    StartPageView(appVM: appVM)
+                } else if let activeTableVM {
+                    VirtualizedGridView(appVM: appVM, tableVM: activeTableVM)
+                } else if appVM.activeDocEntry?.doc.tables.isEmpty == true {
+                    VStack(spacing: 12) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 38))
+                            .foregroundColor(.secondary)
+                        Text("This database has no tables or views.")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
                     }
                 } else {
-                    StartPageView(appVM: appVM)
+                    ProgressView("Loading schema…")
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -136,22 +142,6 @@ public struct MainView: View {
                 .transition(.opacity)
             }
         }
-        .overlay(alignment: .topTrailing) {
-            if appVM.isFindBarVisible, let activeTableVM {
-                FindBarView(tableVM: activeTableVM) {
-                    withAnimation(.easeOut(duration: 0.12)) {
-                        appVM.isFindBarVisible = false
-                        activeTableVM.cancelFind()
-                    }
-                }
-                .padding(.top, 8)
-                .padding(.trailing, 14)
-                .transition(.asymmetric(
-                    insertion: .opacity.combined(with: .move(edge: .top)),
-                    removal: .opacity
-                ))
-            }
-        }
     }
 
 
@@ -171,12 +161,23 @@ public struct MainView: View {
             return
         }
         let key = "\(entry.id):\(appVM.selectedTableName)"
+        let vm: TableViewModel
         if let existing = tableVMCache[key] {
-            activeTableVM = existing
-            return
+            vm = existing
+        } else {
+            let created = TableViewModel(doc: entry.doc, tableName: appVM.selectedTableName, docID: entry.id)
+            tableVMCache[key] = created
+            vm = created
         }
-        let vm = TableViewModel(doc: entry.doc, tableName: appVM.selectedTableName, docID: entry.id)
-        tableVMCache[key] = vm
+        if let drill = appVM.pendingDrillDown, drill.table == appVM.selectedTableName {
+            vm.setFilters(drill.filters)
+            appVM.pendingDrillDown = nil
+        }
+        if let pending = appVM.pendingBanquet,
+           pending.table.isEmpty || pending.table == appVM.selectedTableName {
+            vm.applyBanquet(pending)
+            appVM.pendingBanquet = nil
+        }
         activeTableVM = vm
     }
 

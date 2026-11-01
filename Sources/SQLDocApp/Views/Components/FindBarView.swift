@@ -13,13 +13,9 @@ public struct FindBarView: View {
 
     public var body: some View {
         content
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: DesignToken.radiusPanel))
-            .overlay(
-                RoundedRectangle(cornerRadius: DesignToken.radiusPanel)
-                    .stroke(Color(NSColor.separatorColor), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: DesignToken.radiusPanel))
-            .shadow(color: Color.black.opacity(0.22), radius: 12, x: 0, y: 6)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(NSColor.separatorColor).opacity(0.7), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
             .fixedSize()
             .task {
                 // The field isn't in the window's responder chain during onAppear
@@ -92,7 +88,7 @@ public struct FindBarView: View {
                 Text(countText)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.secondary)
-                    .frame(minWidth: 84, alignment: .trailing)
+                    .frame(minWidth: 56, alignment: .trailing)
 
                 Button { tableVM.previousMatch() } label: {
                     Image(systemName: "chevron.up").font(.system(size: 10, weight: .bold))
@@ -117,7 +113,7 @@ public struct FindBarView: View {
                 .help("Close find (Esc)")
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .frame(height: 28)
             .overlay(alignment: .bottomLeading) {
                 // Incremental scan progress, hugging the bottom edge of the card.
                 if tableVM.isSearching && tableVM.searchProgress < 1.0 {

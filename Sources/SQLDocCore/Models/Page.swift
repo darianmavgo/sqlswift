@@ -194,6 +194,9 @@ public struct Window: Equatable, Sendable {
     /// row on the current page. When present (and non-null) the sorted path seeks
     /// past `(afterSortValue, after)` instead of counting `OFFSET` rows.
     public var afterSortValue: SQLiteValue?
+    /// Keyset anchor for `WITHOUT ROWID` / composite primary key forward paging:
+    /// the primary-key column values (in `pkIndex` order) of the last row on the current page.
+    public var afterPKValues: [SQLiteValue]
     /// Per-column filters, ANDed together.
     public var filters: [ColumnFilter]
     /// Show only rows at ordinals 1, 2, 4, 8, 16, … — a logarithmic spot-check.
@@ -210,6 +213,7 @@ public struct Window: Equatable, Sendable {
         forceOffset: Bool = false,
         sortNumeric: Bool = false,
         afterSortValue: SQLiteValue? = nil,
+        afterPKValues: [SQLiteValue] = [],
         filters: [ColumnFilter] = [],
         powerSample: Bool = false
     ) {
@@ -223,6 +227,7 @@ public struct Window: Equatable, Sendable {
         self.forceOffset = forceOffset
         self.sortNumeric = sortNumeric
         self.afterSortValue = afterSortValue
+        self.afterPKValues = afterPKValues
         self.filters = filters
         self.powerSample = powerSample
     }

@@ -3,13 +3,14 @@ import AppKit
 import SQLDocCore
 
 @main
-struct SQLDocApp: App {
+struct SqlSwiftApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appVM = AppViewModel()
 
     var body: some Scene {
         WindowGroup {
             MainView(appVM: appVM)
+                .navigationTitle(appVM.activeDocEntry.map { "\($0.name) — SqlSwift" } ?? "SqlSwift")
                 .frame(minWidth: 700, minHeight: 450)
                 .onOpenURL { url in
                     if url.scheme == "banquet" || url.scheme == "x-banquet" {
@@ -19,27 +20,32 @@ struct SQLDocApp: App {
                     }
                 }
                 .onAppear {
-                    // Maximize window to fill screen on launch (matching fillScreen behavior)
+                    // Maximize window to fill screen on launch and merge toolbar into titlebar
                     DispatchQueue.main.async {
                         if let window = NSApplication.shared.windows.first(where: { $0.canBecomeMain }) {
+                            AppDelegate.configureUnifiedTitleBar(for: window)
                             if let screen = window.screen ?? NSScreen.main {
                                 window.setFrame(screen.visibleFrame, display: true, animate: false)
                             }
                         }
                     }
 
-                    // Check if files were passed via command line arguments
+                    // Check if files or folders were passed via command line arguments
                     let cliArgs = Array(CommandLine.arguments.dropFirst())
                     for arg in cliArgs where !arg.hasPrefix("-") {
-                        let path = (arg as NSString).expandingTildeInPath
-                        if FileManager.default.fileExists(atPath: path) {
-                            appVM.open(path: path)
+                        let resolved = FolderScanner.resolveLocalPath(arg)
+                        if FileManager.default.fileExists(atPath: resolved) {
+                            appVM.open(path: resolved)
                         }
                     }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .sqldocOpenFileOrFolder)) { note in
+                    if let path = note.object as? String {
+                        appVM.open(path: path)
+                    }
+                }
         }
-        .windowStyle(.titleBar)
-        .windowToolbarStyle(.unified(showsTitle: true))
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About \(AppIdentity.displayName)") { Self.showAboutPanel() }
@@ -60,10 +66,22 @@ struct SQLDocApp: App {
             }
 
             CommandGroup(replacing: .newItem) {
-                Button("Open Database…") {
+                Button("Open Database or Folder…") {
                     appVM.showOpenPanel()
                 }
                 .keyboardShortcut("o", modifiers: .command)
+
+                Button("Browse Folder…") {
+                    appVM.showOpenFolderPanel()
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+
+                Button("All SQLite Files & Folders") {
+                    appVM.isFolderBrowserVisible.toggle()
+                }
+                .keyboardShortcut("b", modifiers: [.command, .option])
+
+                Divider()
 
                 Button("Export Table as CSV…") {
                     appVM.exportCurrentTable()
@@ -78,11 +96,13 @@ struct SQLDocApp: App {
                 .disabled(appVM.activeDocEntry == nil)
             }
 
-            CommandGroup(replacing: .pasteboard) {
-                Button("Paste File Path to Open") {
+            CommandGroup(after: .pasteboard) {
+                Divider()
+
+                Button("Paste Path or Query into Banquet Bar") {
                     appVM.pasteFromClipboard()
                 }
-                .keyboardShortcut("v", modifiers: .command)
+                .keyboardShortcut("v", modifiers: [.command, .shift])
 
                 Button("Copy Banquet URL") {
                     appVM.copyBanquetURL(for: nil)
@@ -92,10 +112,10 @@ struct SQLDocApp: App {
             }
 
             CommandGroup(after: .textEditing) {
-                Button("Focus Address Bar") {
+                Button("Focus & Edit Banquet Bar") {
                     appVM.isBanquetBarEditing = true
                 }
-                .keyboardShortcut("l", modifiers: [.command, .option])
+                .keyboardShortcut("l", modifiers: .command)
 
                 Button("Find in Table…") {
                     appVM.isFindBarVisible.toggle()
@@ -103,16 +123,10 @@ struct SQLDocApp: App {
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(appVM.activeDocEntry == nil)
 
-                Button("Filter Columns") {
-                    appVM.showFilterBar.toggle()
-                }
-                .keyboardShortcut("f", modifiers: [.command, .option])
-                .disabled(appVM.activeDocEntry == nil)
-
                 Button("Jump to Row…") {
                     appVM.showJumpToRow = true
                 }
-                .keyboardShortcut("l", modifiers: .command)
+                .keyboardShortcut("j", modifiers: .command)
                 .disabled(appVM.activeDocEntry == nil)
             }
 
@@ -133,14 +147,6 @@ struct SQLDocApp: App {
                     appVM.showSidebar.toggle()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .option])
-                .disabled(appVM.activeDocEntry == nil)
-
-                Divider()
-
-                Button("Toggle Gallery View") {
-                    appVM.isGalleryView.toggle()
-                }
-                .keyboardShortcut("g", modifiers: [.option, .command])
                 .disabled(appVM.activeDocEntry == nil)
 
                 Divider()
@@ -178,7 +184,7 @@ struct SQLDocApp: App {
     }
 }
 
-extension SQLDocApp {
+extension SqlSwiftApp {
     /// Standard macOS About panel, populated with the marketing version and the
     /// exact build revision.
     static func showAboutPanel() {
@@ -195,26 +201,99 @@ extension SQLDocApp {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var hotReloadTimer: Timer?
+    private var initialStampDate: Date?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Ensure window bounds to screen visible frame on launch
+        ProcessInfo.processInfo.processName = "SqlSwift"
+        // Ensure window bounds to screen visible frame on launch and unified titlebar
         DispatchQueue.main.async {
             for window in NSApplication.shared.windows {
+                Self.configureUnifiedTitleBar(for: window)
                 if let screen = window.screen ?? NSScreen.main {
                     window.setFrame(screen.visibleFrame, display: true, animate: false)
                 }
             }
         }
+        startHotReloadWatcher()
+    }
+
+    static func configureUnifiedTitleBar(for window: NSWindow) {
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.styleMask.insert(.fullSizeContentView)
+        window.toolbar = nil
+        let isDev = Bundle.main.bundleIdentifier == "com.mavgo.sqlswift.dev"
+        window.title = isDev ? "SqlSwift (Dev)" : "SqlSwift"
+    }
+
+    private func startHotReloadWatcher() {
+        #if !DEBUG
+        // Installed / production release builds NEVER run the hot-reload watcher.
+        return
+        #else
+        // In debug builds, only run hot-reload if running out of the development
+        // workspace (bin/ or .build/), and NEVER when running as an installed application.
+        let bundlePath = Bundle.main.bundleURL.path
+        if bundlePath.hasPrefix("/Applications") || bundlePath.contains("/Applications/") {
+            return
+        }
+
+        let isRepoDev = bundlePath.contains("/sqlswift/bin/") || bundlePath.contains("/.build/")
+        let isDevBundle = Bundle.main.bundleIdentifier == "com.mavgo.sqlswift.dev"
+        let isExplicitEnv = ProcessInfo.processInfo.environment["SQLSWIFT_HOT_RELOAD"] == "1"
+        guard isRepoDev || isDevBundle || isExplicitEnv else { return }
+
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let repoBinDir = "\(home)/Documents/view_sqlite/sqlswift/bin"
+        let stampPath = "\(repoBinDir)/.hot-reload.stamp"
+        let appBundlePath = "\(repoBinDir)/SqlSwift.app"
+        let appBinaryPath = "\(appBundlePath)/Contents/MacOS/SqlSwift"
+
+        initialStampDate = Self.modDate(of: stampPath) ?? Self.modDate(of: appBinaryPath)
+
+        hotReloadTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let currentDate = Self.modDate(of: stampPath)
+                guard let currentDate else { return }
+                if let prev = self.initialStampDate, currentDate <= prev {
+                    return
+                }
+                self.initialStampDate = currentDate
+                guard FileManager.default.isExecutableFile(atPath: appBinaryPath) else { return }
+
+                UserDefaults.standard.synchronize()
+
+                // Relaunch into the freshly compiled dev binary as an independent instance
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                proc.arguments = ["-n", appBundlePath]
+                try? proc.run()
+                exit(0)
+            }
+        }
+        #endif
+    }
+
+    private static func modDate(of path: String) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
     }
 
     func application(_ application: NSApplication, openFiles filenames: [String]) {
         for filename in filenames {
-            let path = (filename as NSString).expandingTildeInPath
-            if FileManager.default.fileExists(atPath: path) {
+            let resolved = FolderScanner.resolveLocalPath(filename)
+            if FileManager.default.fileExists(atPath: resolved) {
                 Task { @MainActor in
-                    _ = try? SessionManager.shared.open(path: path)
+                    NotificationCenter.default.post(name: .sqldocOpenFileOrFolder, object: resolved)
                 }
             }
         }
     }
+}
+
+extension Notification.Name {
+    static let sqldocOpenFileOrFolder = Notification.Name("sqldocOpenFileOrFolder")
 }

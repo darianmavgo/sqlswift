@@ -6,7 +6,7 @@ public struct DataInspectorView: View {
     let info: CellInspectInfo
     let onDismiss: () -> Void
 
-    @State private var isPrettyJSON: Bool = false
+    @State private var isPrettyJSON: Bool = true
     @State private var wrapLines: Bool = true
     @State private var copiedNotice: Bool = false
 
@@ -104,9 +104,10 @@ public struct DataInspectorView: View {
     // MARK: - Text Inspector
     private func textInspectorView(_ text: String) -> some View {
         let isJSON = isValidJSON(text)
-        let formattedText = isPrettyJSON ? prettyPrintJSON(text) : text
+        let formattedText = (isJSON && isPrettyJSON) ? prettyPrintJSON(text) : text
+        let jsonPairs = isJSON ? parseJSONPairs(text) : []
 
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("\(text.count) characters · \(text.utf8.count) bytes · \(text.components(separatedBy: .newlines).count) lines")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
@@ -125,6 +126,10 @@ public struct DataInspectorView: View {
                     .font(.system(size: 11))
             }
 
+            if !jsonPairs.isEmpty {
+                jsonStructuredView(pairs: jsonPairs)
+            }
+
             Text(formattedText)
                 .font(.system(size: 12, design: isJSON ? .monospaced : .default))
                 .foregroundColor(.primary)
@@ -134,6 +139,78 @@ public struct DataInspectorView: View {
                 .padding(10)
                 .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
                 .cornerRadius(6)
+        }
+    }
+
+    @ViewBuilder
+    private func jsonStructuredView(pairs: [(key: String, text: String, number: Double?)]) -> some View {
+        let numericValues = pairs.compactMap { $0.number }
+        let isHistogram = numericValues.count == pairs.count && pairs.count >= 2 && numericValues.allSatisfy { $0 >= 0 }
+        let maxVal = max(1.0, numericValues.max() ?? 1.0)
+        let totalVal = numericValues.reduce(0, +)
+
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(pairs.enumerated()), id: \.offset) { _, item in
+                HStack(spacing: 8) {
+                    Text(item.key)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .frame(width: 110, alignment: .trailing)
+
+                    if isHistogram, let n = item.number {
+                        GeometryReader { geo in
+                            let ratio = CGFloat(max(0, min(1, n / maxVal)))
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.secondary.opacity(0.12))
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.accentColor.opacity(0.75))
+                                    .frame(width: max(2, geo.size.width * ratio))
+                            }
+                        }
+                        .frame(height: 12)
+
+                        let pct = totalVal > 0 ? (n / totalVal * 100.0) : 0
+                        Text("\(item.text) (\(String(format: "%.1f%%", pct)))")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.primary)
+                            .frame(width: 110, alignment: .trailing)
+                    } else {
+                        Text(item.text)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.primary)
+                            .textSelection(.enabled)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+        .cornerRadius(6)
+    }
+
+    private func parseJSONPairs(_ str: String) -> [(key: String, text: String, number: Double?)] {
+        guard let data = str.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              !dict.isEmpty else { return [] }
+        let keys = dict.keys.sorted { a, b in
+            if let na = Double(a), let nb = Double(b) { return na < nb }
+            return a < b
+        }
+        return keys.map { k in
+            let v = dict[k]
+            if let num = v as? NSNumber {
+                if CFGetTypeID(num) == CFBooleanGetTypeID() {
+                    return (k, num.boolValue ? "true" : "false", nil)
+                }
+                let d = num.doubleValue
+                return (k, SQLiteValueFormat.realString(d), d)
+            } else if let s = v as? String {
+                return (k, s, nil)
+            } else {
+                return (k, String(describing: v ?? "null"), nil)
+            }
         }
     }
 
@@ -180,13 +257,15 @@ public struct DataInspectorView: View {
 
     private func realInspectorView(_ val: Double) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(String(format: "%g", val))
+            Text(SQLiteValueFormat.realString(val))
                 .font(.system(size: 20, weight: .semibold, design: .monospaced))
                 .foregroundColor(.primary)
                 .textSelection(.enabled)
 
             VStack(alignment: .leading, spacing: 6) {
-                detailRow(label: "Standard Float", value: "\(val)")
+                detailRow(label: "Exact IEEE-754", value: "\(val)")
+                detailRow(label: "Fixed (2 dec)", value: SQLiteValueFormat.realString(val, decimals: 2, trimTrailingZeros: false))
+                detailRow(label: "Fixed (4 dec)", value: SQLiteValueFormat.realString(val, decimals: 4, trimTrailingZeros: false))
                 detailRow(label: "Scientific", value: String(format: "%e", val))
             }
             .padding(10)

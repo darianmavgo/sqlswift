@@ -18,6 +18,37 @@ public struct StatusBarView: View {
                     .font(.system(size: 11)).foregroundColor(.secondary)
             }
 
+            if tableVM.fileChangedOnDisk {
+                Button(action: { tableVM.reloadFromDisk() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise.circle.fill")
+                            .font(.system(size: 10))
+                        Text("Updated on disk · Reload")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.accentColor.opacity(0.15))
+                    .foregroundColor(.accentColor)
+                    .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
+                .help("The SQLite file or its WAL changed on disk — click to reload")
+            }
+
+            if tableVM.displayKind == .trim {
+                let shown = tableVM.visibleColumns.count
+                let total = tableVM.rawColumns.count
+                Text("trim · \(shown)/\(total) cols")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.accentColor)
+                    .help("Trim mode active — click Raw in the toolbar to show all \(total) columns")
+            } else if tableVM.displayKind == .summary {
+                Text("summary · \(tableVM.currentPage?.rows.count ?? 0) groups")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.accentColor)
+            }
+
             if tableVM.powerSampleMode {
                 Label("power-2 sample", systemImage: "chart.bar.doc.horizontal")
                     .font(.system(size: 11)).foregroundColor(.accentColor)
@@ -57,6 +88,15 @@ public struct StatusBarView: View {
 
             // Display options
             Menu {
+                Picker("View mode", selection: Binding(
+                    get: { tableVM.displayKind },
+                    set: { tableVM.setDisplayKind($0) }
+                )) {
+                    ForEach(DisplayKind.allCases, id: \.self) { kind in
+                        Text(kind.label).tag(kind)
+                    }
+                }
+                Divider()
                 Picker("Row height", selection: Binding(
                     get: { tableVM.rowHeightScale },
                     set: { tableVM.rowHeightScale = $0 }
@@ -69,6 +109,8 @@ public struct StatusBarView: View {
                     get: { tableVM.wrapCells }, set: { tableVM.wrapCells = $0 }))
                 Toggle("Smart formatting", isOn: Binding(
                     get: { tableVM.smartFormat }, set: { tableVM.smartFormat = $0 }))
+                Toggle("Quick chart strip", isOn: Binding(
+                    get: { tableVM.showQuickChart }, set: { tableVM.showQuickChart = $0 }))
             } label: {
                 Image(systemName: "textformat.size").font(.system(size: 11))
             }
@@ -110,28 +152,48 @@ public struct StatusBarView: View {
 
     private var pager: some View {
         HStack(spacing: 6) {
-            pagerButton("backward.end.fill", help: "First page (Home)",
-                        disabled: tableVM.currentOffset <= 0) { tableVM.loadPage(offset: 0) }
-            pagerButton("chevron.left", help: "Previous 100 (Page Up)",
-                        disabled: tableVM.currentOffset <= 0) { tableVM.previousPage() }
+            pagerButton("backward.end.fill", help: "First page [0:\(tableVM.pageLimit)] (Home)",
+                        disabled: tableVM.currentOffset <= 0) { appVM.paginateFirst(tableVM: tableVM) }
+            pagerButton("chevron.left", help: "Previous \(tableVM.pageLimit) (Page Up)",
+                        disabled: tableVM.currentOffset <= 0) { appVM.paginatePrevious(tableVM: tableVM) }
 
             if let page = tableVM.currentPage {
                 let startRow = page.start + 1
                 let endRow = page.start + Int64(page.rows.count)
                 let approx = page.approx ? "~" : ""
-                let total: String = tableVM.powerSampleMode ? "\(page.rows.count)"
-                    : (!tableVM.filters.isEmpty ? (tableVM.filteredCount.map(String.init) ?? "…")
-                       : tableVM.tableCount.displayString)
+                let total: String = {
+                    if tableVM.powerSampleMode {
+                        return "\(page.rows.count)"
+                    } else if tableVM.isCustomBanquetQuery {
+                        return tableVM.customQueryRowCount.map(String.init) ?? "\(page.rows.count)"
+                    } else if !tableVM.filters.isEmpty {
+                        return tableVM.filteredCount.map(String.init) ?? "…"
+                    } else {
+                        return tableVM.tableCount.displayString
+                    }
+                }()
                 Text("\(startRow)–\(endRow) / \(total)\(approx)")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(.secondary)
                     .frame(minWidth: 90)
             }
 
-            pagerButton("chevron.right", help: "Next 100 (Page Down)",
-                        disabled: tableVM.currentPage?.rows.isEmpty ?? true) { tableVM.nextPage() }
+            let atEnd: Bool = {
+                guard let page = tableVM.currentPage else { return true }
+                if page.rows.isEmpty { return true }
+                if tableVM.isCustomBanquetQuery, let count = tableVM.customQueryRowCount {
+                    return page.start + Int64(page.rows.count) >= Int64(count)
+                }
+                if let total = !tableVM.filters.isEmpty ? tableVM.filteredCount : (tableVM.tableCount.known ? tableVM.tableCount.rows : nil) {
+                    return page.start + Int64(page.rows.count) >= total
+                }
+                return page.rows.count < tableVM.pageLimit
+            }()
+
+            pagerButton("chevron.right", help: "Next \(tableVM.pageLimit) (Page Down)",
+                        disabled: atEnd) { appVM.paginateNext(tableVM: tableVM) }
             pagerButton("forward.end.fill", help: "Last page (End)",
-                        disabled: false) { tableVM.loadLastPage() }
+                        disabled: atEnd) { appVM.paginateLast(tableVM: tableVM) }
         }
     }
 

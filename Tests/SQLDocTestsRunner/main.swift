@@ -548,6 +548,233 @@ func runAllTests() async {
         expectEqual(b.rawQuery, "orderid=-1&tag=prime+val&filter={status:active}&search=~alt#fragment-top")
     }
 
+    // Float Formatting & Noise Elimination Tests
+    await test("SQLiteValueFormat: Quant/Float smart formatting & rawText preservation") {
+        // IEEE-754 float32 noise from daily_bars.db
+        expectEqual(SQLiteValueFormat.realString(46.4199981689453), "46.42")
+        // Unrounded ratios from regime_score.db
+        expectEqual(SQLiteValueFormat.realString(0.842105263157895), "0.8421")
+        expectEqual(SQLiteValueFormat.realString(-0.00722589489603039), "-0.0072")
+        // Large PnL with integer grouping + 2 decimals
+        expectEqual(SQLiteValueFormat.realString(14387.06458, decimals: 2, trimTrailingZeros: false), "14,387.06")
+        expectEqual(SQLiteValueFormat.realString(14387.06458, decimals: 2, trimTrailingZeros: false, forceSign: true), "+14,387.06")
+        // Raw text keeps full IEEE-754 representation
+        let val = SQLiteValue.real(46.4199981689453)
+        expectEqual(val.displayText, "46.42")
+        expectTrue(val.rawText.hasPrefix("46.419998"))
+    }
+
+    // WITHOUT ROWID Composite PK Keyset Seeking Tests
+    await test("RowReader: WITHOUT ROWID composite primary key keyset seeking") {
+        let tempDir = NSTemporaryDirectory()
+        let tempDBPath = (tempDir as NSString).appendingPathComponent("without_rowid_\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(atPath: tempDBPath) }
+
+        let conn = try SQLiteConnection(path: tempDBPath, readOnly: false)
+        try conn.exec("""
+            CREATE TABLE daily_bar (
+                symbol TEXT NOT NULL,
+                date TEXT NOT NULL,
+                close REAL NOT NULL,
+                volume INTEGER NOT NULL,
+                PRIMARY KEY (symbol, date)
+            ) WITHOUT ROWID
+        """)
+        try conn.exec("BEGIN TRANSACTION")
+        let symbols = ["AAA", "QQQ", "SPY", "TQQQ", "VOO"]
+        for sym in symbols {
+            for day in 1...40 {
+                let dStr = String(format: "2026-01-%02d", day)
+                try conn.exec("INSERT INTO daily_bar VALUES ('\(sym)', '\(dStr)', \(100.0 + Double(day) * 0.25), \(1000 * day))")
+            }
+        }
+        try conn.exec("COMMIT")
+        conn.close()
+
+        let doc = try Doc.open(path: tempDBPath)
+        defer { doc.close() }
+
+        let cols = try doc.columns(for: "daily_bar")
+        expectEqual(cols[0].pkIndex, 1)
+        expectEqual(cols[1].pkIndex, 2)
+
+        // Page 1 (offset 0, no OFFSET scan needed -> pk-keyset)
+        let p1 = try doc.rows(window: Window(table: "daily_bar", limit: 50))
+        expectEqual(p1.path, "pk-keyset")
+        expectEqual(p1.rows.count, 50)
+        expectEqual(p1.rows.first?[0], .text("AAA"))
+        expectEqual(p1.rows.first?[1], .text("2026-01-01"))
+
+        // Walk the entire 200-row WITHOUT ROWID table via afterPKValues keyset seeks
+        var collected: [String] = p1.rows.map { "\($0[0].textValue!)|\($0[1].textValue!)" }
+        var lastRow = p1.rows.last!
+        var off: Int64 = 50
+        for _ in 0..<5 {
+            let anchorPK: [SQLiteValue] = [lastRow[0], lastRow[1]]
+            let pg = try doc.rows(window: Window(
+                table: "daily_bar",
+                limit: 50,
+                useAfter: true,
+                offset: off,
+                afterPKValues: anchorPK
+            ))
+            if pg.rows.isEmpty { break }
+            expectEqual(pg.path, "pk-keyset")
+            collected.append(contentsOf: pg.rows.map { "\($0[0].textValue!)|\($0[1].textValue!)" })
+            lastRow = pg.rows.last!
+            off += 50
+        }
+        expectEqual(collected.count, 200)
+        expectEqual(Set(collected).count, 200)
+    }
+
+    // QueryStyle Trim, Summary & Lineage Tests
+    await test("QueryStyle: Trim column ordering/hiding, Summary rollup, and View lineage") {
+        let tempDir = NSTemporaryDirectory()
+        let tempDBPath = (tempDir as NSString).appendingPathComponent("querystyle_\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(atPath: tempDBPath) }
+
+        let conn = try SQLiteConnection(path: tempDBPath, readOnly: false)
+        try conn.exec("""
+            CREATE TABLE regime_score (
+                rn INTEGER,
+                empty_col TEXT,
+                created_at TEXT,
+                avg_hold_days REAL,
+                profit_factor REAL,
+                total_net_pnl REAL,
+                avg_return_pct REAL,
+                win_rate REAL,
+                wins INTEGER,
+                n INTEGER,
+                regime TEXT,
+                win TEXT,
+                strategy_id TEXT PRIMARY KEY
+            )
+        """)
+        try conn.exec("""
+            INSERT INTO regime_score VALUES
+            (1, NULL, '2026-10-12', 3.6, 10.84, 14387.06, 0.0635, 0.875, 7, 8, 'bull', 'in_sample', 'strat_a'),
+            (2, NULL, '2026-10-12', 4.0, 1.94, 26705.02, 0.0391, 0.842, 16, 19, 'sideways', 'in_sample', 'strat_b'),
+            (3, NULL, '2026-10-12', 4.3, 8.25, 26568.44, 0.0784, 0.900, 9, 10, 'bull', 'oos', 'strat_c'),
+            (4, NULL, '2026-10-12', 4.5, 1.07, 3473.08, 0.0061, 0.833, 25, 30, 'sideways', 'oos', 'strat_d'),
+            (5, NULL, '2026-10-12', 3.2, 5.50, 9500.00, 0.0510, 0.880, 11, 12, 'bull', 'oos', 'strat_e')
+        """)
+        try conn.exec("""
+            CREATE VIEW v_bull_regimes AS
+            -- High-conviction bull regime filter
+            SELECT strategy_id, win, regime, win_rate, total_net_pnl
+            FROM regime_score
+            WHERE regime = 'bull'
+        """)
+        conn.close()
+
+        let doc = try Doc.open(path: tempDBPath)
+        defer { doc.close() }
+
+        let plan = doc.trimPlan(for: "regime_score")
+        // Primary key `strategy_id` must be ordered first
+        expectEqual(plan.ordered.first?.name, "strategy_id")
+        // `empty_col`, `rn` (row number), and `created_at` (system column) must be hidden in Trim
+        expectTrue(plan.hidden.contains("empty_col"))
+        expectTrue(plan.hidden.contains("rn"))
+        expectTrue(plan.hidden.contains("created_at"))
+
+        // Summary mode groups by low-cardinality dimensions (regime, win)
+        let summary = try doc.summaryPage(for: "regime_score")
+        expectEqual(summary.path, "summary-group")
+        expectTrue(summary.rows.count >= 2)
+        expectTrue(summary.columns.contains { $0.name == "rows" })
+
+        // View lineage & comment extraction
+        let lineage = doc.viewLineage(for: "v_bull_regimes")
+        expectEqual(lineage.comment, "High-conviction bull regime filter")
+        expectEqual(lineage.upstream, ["regime_score"])
+        let parentLineage = doc.viewLineage(for: "regime_score")
+        expectEqual(parentLineage.downstream, ["v_bull_regimes"])
+
+        // Related tables by column name
+        let related = doc.relatedTables(forColumn: "strategy_id", excluding: "regime_score")
+        expectEqual(related, ["v_bull_regimes"])
+    }
+
+    await test("FolderScanner: Resolves stripped leading slash & scans nested SQLite files") {
+        let rootDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sqldoc_folder_test_\(UUID().uuidString)")
+        let subDir = rootDir.appendingPathComponent("reports/oos")
+        try FileManager.default.createDirectory(at: subDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootDir) }
+
+        let db1Path = rootDir.appendingPathComponent("daily_bars.db").path
+        let db2Path = subDir.appendingPathComponent("rotation.db").path
+
+        for (p, tbl) in [(db1Path, "daily_bars"), (db2Path, "rotation_summary")] {
+            let conn = try SQLiteConnection(path: p, readOnly: false)
+            try conn.exec("CREATE TABLE \(tbl) (id INT, val REAL); CREATE VIEW v_\(tbl) AS SELECT * FROM \(tbl);")
+            conn.close()
+        }
+
+        // Verify resolveLocalPath restores a stripped leading "/" (from BanquetParser.cleanURL)
+        let stripped = String(rootDir.path.dropFirst())
+        let resolved = FolderScanner.resolveLocalPath(stripped + "/")
+        expectEqual(resolved, rootDir.standardizedFileURL.path)
+        expectTrue(FolderScanner.isDirectory(resolved))
+
+        let scanned = FolderScanner.scan(rootPath: stripped, maxDepth: 4, inspectSchema: true)
+        expectEqual(scanned.files.count, 2)
+        expectEqual(scanned.folders.count, 2)
+        expectEqual(scanned.files[0].name, "daily_bars.db")
+        expectEqual(scanned.files[0].relativeFolder, ".")
+        expectEqual(scanned.files[0].tables, ["daily_bars"])
+        expectEqual(scanned.files[0].views, ["v_daily_bars"])
+        expectEqual(scanned.files[1].name, "rotation.db")
+        expectEqual(scanned.files[1].relativeFolder, "reports/oos")
+    }
+
+    await test("Banquet: Pasted SQL & aggregate expressions in Banquet URL") {
+        let b1 = try BanquetParser.parse("daily_bars.db/daily_bar[0:100]/select count(*), min(date), max(date) from daily_bar where symbol='QQQ';")
+        expectEqual(b1.dataSetPath, "daily_bars.db")
+        expectEqual(b1.table, "daily_bar")
+        expectEqual(b1.select, ["count(*)", "min(date)", "max(date)"])
+        expectEqual(b1.whereClause, "symbol='QQQ'")
+        expectEqual(b1.offset, 0)
+        expectEqual(b1.limit, 100)
+        expectEqual(b1.groupBy, nil)
+
+        let b2 = try BanquetParser.parse("daily_bars.db/daily_bar[0:100]/count(*), min(date), max(date)?where=symbol='QQQ'")
+        expectEqual(b2.dataSetPath, "daily_bars.db")
+        expectEqual(b2.table, "daily_bar")
+        expectEqual(b2.select, ["count(*)", "min(date)", "max(date)"])
+        expectEqual(b2.whereClause, "symbol='QQQ'")
+        expectEqual(b2.offset, 0)
+        expectEqual(b2.limit, 100)
+        expectEqual(b2.groupBy, nil)
+
+        let sql = BanquetComposer.compose(b1)
+        expectEqual(sql, "SELECT count(*), min(date), max(date) FROM \"daily_bar\" WHERE symbol='QQQ' LIMIT 100 OFFSET 0")
+    }
+
+    await test("Banquet: Collection & Database Overview URLs") {
+        // 1. Root folder databases collection
+        let b1 = try BanquetParser.parse("data/databases")
+        expectEqual(b1.dataSetPath, "data")
+        expectEqual(b1.table, "databases")
+        expectTrue(b1.isCollection || b1.table == "databases")
+
+        // 2. Subfolder collection with sort and where query
+        let b2 = try BanquetParser.parse("data/reports/1/oos/databases/-size_bytes?where=markov")
+        expectEqual(b2.dataSetPath, "data/reports/1/oos")
+        expectEqual(b2.table, "databases")
+        expectEqual(b2.sortColumn, "size_bytes")
+        expectTrue(b2.isSortDesc)
+        expectEqual(b2.whereClause, "markov")
+
+        // 3. Database Overview (tables catalog)
+        let b3 = try BanquetParser.parse("reports/1/oos/markov.db/tables")
+        expectEqual(b3.dataSetPath, "reports/1/oos/markov.db")
+        expectEqual(b3.table, "tables")
+    }
+
     print("\n-------------------------------------------------------")
     print("Results: \(passed) passed, \(failed) failed")
     print("-------------------------------------------------------\n")

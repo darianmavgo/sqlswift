@@ -1,15 +1,14 @@
 import Foundation
 import SQLite3
 
-/// Fast integer grouping. `NumberFormatter` costs microseconds per call — far too
-/// much to run per cell — so group the digits by hand with the locale's grouping
-/// separator (resolved once).
-enum SQLiteValueFormat {
-    private static let groupingSeparator: String = {
-        Locale.current.groupingSeparator ?? ","
-    }()
+/// Fast numeric formatting. `NumberFormatter` costs microseconds per call — far too
+/// much to run per cell — so group digits and round floats by hand with the locale's
+/// separators (resolved once).
+public enum SQLiteValueFormat {
+    private static let groupingSeparator: String = ","
+    private static let decimalSeparator: String = "."
 
-    static func integerString(_ v: Int64) -> String {
+    public static func integerString(_ v: Int64) -> String {
         let negative = v < 0
         // Careful with Int64.min, whose magnitude has no positive representation.
         var digits = String(v.magnitude)
@@ -29,6 +28,83 @@ enum SQLiteValueFormat {
         }
         digits.removeAll()
         return negative ? "-" + out : out
+    }
+
+    /// Formats a floating-point number without IEEE-754 noise (e.g. `46.4199981689453` → `46.42`,
+    /// `0.842105263157895` → `0.8421`, `14387.06458` → `14,387.06`), grouping the integer part.
+    public static func realString(
+        _ v: Double,
+        decimals: Int? = nil,
+        trimTrailingZeros: Bool = true,
+        forceSign: Bool = false
+    ) -> String {
+        if v.isNaN { return "NaN" }
+        if v.isInfinite { return v < 0 ? "-∞" : "∞" }
+        if v == 0.0 {
+            if let d = decimals, d > 0, !trimTrailingZeros {
+                return "0" + decimalSeparator + String(repeating: "0", count: d)
+            }
+            return "0"
+        }
+
+        let absVal = abs(v)
+        if decimals == nil && (absVal < 1e-6 || absVal >= 1e15) {
+            return String(format: "%.4e", v)
+        }
+
+        let places: Int
+        if let d = decimals {
+            places = max(0, min(10, d))
+        } else if absVal >= 100.0 {
+            places = 2
+        } else if absVal >= 1.0 {
+            // Check if 2 decimals is effectively exact (within float32/float64 representation noise, e.g. 46.4199981689453)
+            let r2 = (absVal * 100.0).rounded() / 100.0
+            places = abs(absVal - r2) < 1e-4 ? 2 : 4
+        } else if absVal >= 0.001 {
+            places = 4
+        } else {
+            places = 6
+        }
+
+        var multiplier = 1.0
+        for _ in 0..<places { multiplier *= 10.0 }
+
+        let scaled = (absVal * multiplier).rounded()
+        let intMultiplier = Int64(multiplier)
+        let totalUnits = Int64(scaled)
+        let wholePart = totalUnits / max(1, intMultiplier)
+        let fracUnits = totalUnits % max(1, intMultiplier)
+
+        let signPrefix: String
+        if v < 0 && (wholePart > 0 || fracUnits > 0) {
+            signPrefix = "-"
+        } else if forceSign && v > 0 && (wholePart > 0 || fracUnits > 0) {
+            signPrefix = "+"
+        } else {
+            signPrefix = ""
+        }
+
+        let wholeStr = integerString(wholePart)
+        guard places > 0 else { return signPrefix + wholeStr }
+
+        if fracUnits == 0 && trimTrailingZeros {
+            return signPrefix + wholeStr
+        }
+
+        var fracStr = String(fracUnits)
+        if fracStr.count < places {
+            fracStr = String(repeating: "0", count: places - fracStr.count) + fracStr
+        }
+        if trimTrailingZeros {
+            while fracStr.last == "0" {
+                fracStr.removeLast()
+            }
+            if fracStr.isEmpty {
+                return signPrefix + wholeStr
+            }
+        }
+        return signPrefix + wholeStr + decimalSeparator + fracStr
     }
 }
 
@@ -104,6 +180,22 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
         }
     }
 
+    /// Full-precision raw text representation for tooltips and inspectors.
+    public var rawText: String {
+        switch self {
+        case .null:
+            return "NULL"
+        case .integer(let v):
+            return String(v)
+        case .real(let v):
+            return String(v)
+        case .text(let s):
+            return s
+        case .blob(let count):
+            return "◼ \(formatBytes(count))"
+        }
+    }
+
     /// Formats the value for display in the grid cell
     public var displayText: String {
         switch self {
@@ -112,7 +204,7 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
         case .integer(let v):
             return SQLiteValueFormat.integerString(v)
         case .real(let v):
-            return String(format: "%g", v)
+            return SQLiteValueFormat.realString(v)
         case .text(let s):
             return s
         case .blob(let count):

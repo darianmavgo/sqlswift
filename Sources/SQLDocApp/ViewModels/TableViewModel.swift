@@ -41,24 +41,54 @@ public final class TableViewModel: ObservableObject {
     // the page or query changes — never per render/scroll frame.
     @Published public var highlightMask: [[Bool]] = []
 
-    // Filter bar
+    // Filter bar & Banquet query clauses
     @Published public var filters: [ColumnFilter] = []
     @Published public var filteredCount: Int64? = nil
+    @Published public var banquetSelect: [String] = ["*"]
+    @Published public var banquetGroupBy: String? = nil
+    @Published public var banquetHaving: String? = nil
+    @Published public var banquetWhereClause: String? = nil
+    @Published public var extraQueryParams: [String] = []
+    @Published public var rawQuery: String = ""
+    @Published public var queryError: String? = nil
+    @Published public var customQueryRowCount: Int? = nil
 
     // Power-2 spot-check
     @Published public var powerSampleMode: Bool = false
 
     // Display
+    @Published public var displayKind: DisplayKind = .raw
+    @Published public var rawColumns: [Column] = []
+    @Published public var trimOrderedColumns: [Column] = []
+    @Published public var trimHiddenColumns: Set<String> = []
     @Published public var hiddenColumns: Set<String> = []
     @Published public var rowHeightScale: Double = 1.0   // 1 = compact, 2 = regular, 3 = tall
     @Published public var wrapCells: Bool = false
     @Published public var smartFormat: Bool = true
 
+    // Quick Chart Strip
+    @Published public var showQuickChart: Bool = false
+    @Published public var chartColumn: String? = nil
+
+    // Live WAL / file change detection
+    @Published public var fileChangedOnDisk: Bool = false
+    private var watchTask: Task<Void, Never>?
+
     // Background-job label for the status bar ("counting…", "sampling…")
     @Published public var backgroundJob: String? = nil
 
-    /// Columns actually shown in the grid (order preserved, hidden removed).
-    public var visibleColumns: [Column] { columns.filter { !hiddenColumns.contains($0.name) } }
+    /// Columns actually shown in the grid (ordered for the active `displayKind`, hidden removed).
+    public var visibleColumns: [Column] {
+        switch displayKind {
+        case .raw:
+            return columns.filter { !hiddenColumns.contains($0.name) }
+        case .trim:
+            let base = trimOrderedColumns.isEmpty ? columns : trimOrderedColumns
+            return base.filter { !trimHiddenColumns.contains($0.name) && !hiddenColumns.contains($0.name) }
+        case .summary:
+            return columns.filter { !hiddenColumns.contains($0.name) }
+        }
+    }
 
     private var findTask: Task<Void, Never>?
     private var filterCountTask: Task<Void, Never>?
@@ -83,6 +113,7 @@ public final class TableViewModel: ObservableObject {
     deinit {
         findTask?.cancel()
         filterCountTask?.cancel()
+        watchTask?.cancel()
         // Detach this table's background observers.
         doc.counterWorker.setObserver(for: tableName, nil)
         doc.columnSampler.setObserver(for: tableName, nil)
@@ -92,6 +123,7 @@ public final class TableViewModel: ObservableObject {
     public func dispose() {
         findTask?.cancel(); findTask = nil
         filterCountTask?.cancel(); filterCountTask = nil
+        watchTask?.cancel(); watchTask = nil
         doc.counterWorker.setObserver(for: tableName, nil)
         doc.columnSampler.setObserver(for: tableName, nil)
     }
@@ -101,9 +133,14 @@ public final class TableViewModel: ObservableObject {
 
         // Cheap, synchronous facts only — a single PRAGMA and an O(1) estimate.
         do {
-            self.columns = try doc.columns(for: tableName)
+            let loadedCols = try doc.columns(for: tableName)
+            self.rawColumns = loadedCols
+            self.columns = loadedCols
+            self.trimOrderedColumns = QueryStyle.orderColumns(columns: loadedCols)
         } catch {
+            self.rawColumns = []
             self.columns = []
+            self.trimOrderedColumns = []
         }
         self.tableCount = doc.count(for: tableName)
 
@@ -128,8 +165,9 @@ public final class TableViewModel: ObservableObject {
         _ = doc.columnHints(for: tableName)
 
         // Restore persisted per-table preferences.
-        self.hiddenColumns = StatePersistenceManager.shared.loadHiddenColumns(dbID: docID, table: tableName)
+        let savedHidden = StatePersistenceManager.shared.loadHiddenColumns(dbID: docID, table: tableName)
             .intersection(Set(columns.map { $0.name }))
+        self.hiddenColumns = savedHidden
         if let s = StatePersistenceManager.shared.loadSort(dbID: docID, table: tableName),
            columns.contains(where: { $0.name == s.column }) {
             self.sortColumn = s.column
@@ -137,8 +175,135 @@ public final class TableViewModel: ObservableObject {
             self.sortNumeric = s.numeric
         }
 
+        // Auto-engage Trim view on wide tables (> 14 columns, e.g. 39-col performance_summary)
+        // when the user hasn't manually configured hidden columns.
+        if rawColumns.count > 14 && savedHidden.isEmpty {
+            self.displayKind = .trim
+        }
+        computeTrimPlanAsync()
+
         // The actual first query runs off the main thread.
         loadPage(offset: 0)
+        startDiskWatcher()
+    }
+
+    private func startDiskWatcher() {
+        watchTask?.cancel()
+        let docRef = doc
+        watchTask = Task.detached(priority: .background) { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if Task.isCancelled { break }
+                if docRef.checkModifiedOnDisk() {
+                    await MainActor.run {
+                        self?.fileChangedOnDisk = true
+                    }
+                }
+            }
+        }
+    }
+
+    public func reloadFromDisk() {
+        doc.invalidateCaches()
+        fileChangedOnDisk = false
+        tableCount = doc.count(for: tableName)
+        computeTrimPlanAsync()
+        loadPage(offset: currentOffset)
+    }
+
+    public func setDisplayKind(_ kind: DisplayKind) {
+        guard displayKind != kind else { return }
+        let wasSummary = (displayKind == .summary)
+        displayKind = kind
+
+        if kind == .summary {
+            runSummaryLoad()
+        } else {
+            if wasSummary {
+                columns = rawColumns
+                didMeasureFromData = false
+            }
+            if kind == .trim && trimOrderedColumns.isEmpty {
+                computeTrimPlanAsync()
+            }
+            loadPage(offset: 0)
+        }
+    }
+
+    private func computeTrimPlanAsync() {
+        let docRef = doc
+        let table = tableName
+        Task.detached(priority: .utility) { [weak self] in
+            let plan = docRef.trimPlan(for: table)
+            await MainActor.run {
+                guard let self else { return }
+                self.trimOrderedColumns = plan.ordered
+                self.trimHiddenColumns = plan.hidden
+                if self.chartColumn == nil {
+                    self.chartColumn = self.defaultChartColumn()
+                }
+            }
+        }
+    }
+
+    /// Selects the highest-signal numeric column for the quick chart strip
+    /// (e.g. `total_equity`, `close`, `cagr`, `net_pnl`, `return_pct`).
+    public func defaultChartColumn() -> String? {
+        let preferred = [
+            "total_equity", "final_equity", "close", "adj_close", "cagr",
+            "total_return_pct", "avg_return_pct", "return_pct", "net_pnl",
+            "total_net_pnl", "net_profit", "win_rate", "sharpe_ratio",
+            "profit_factor", "signal", "prob_bull", "up_streak", "down_streak"
+        ]
+        let numCols = visibleColumns.filter { $0.isNumeric && !$0.pk }
+        for pref in preferred {
+            if let found = numCols.first(where: { $0.name.lowercased() == pref }) {
+                return found.name
+            }
+        }
+        return numCols.first?.name
+    }
+
+    public func setFilters(_ newFilters: [ColumnFilter]) {
+        self.filters = newFilters
+        self.banquetWhereClause = nil
+        applyFiltersChanged()
+    }
+
+    private func runSummaryLoad() {
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        self.isLoading = true
+        let docRef = doc
+        let table = tableName
+        let fs = filters
+        let sortCol = sortColumn
+        let desc = isSortDesc
+        let sortNum = sortNumeric
+
+        Task.detached(priority: .userInitiated) {
+            let result: Page? = try? docRef.summaryPage(
+                for: table,
+                filters: fs,
+                sort: sortCol,
+                desc: desc,
+                sortNumeric: sortNum
+            )
+            await MainActor.run { [weak self] in
+                guard let self, generation == self.loadGeneration else { return }
+                self.isLoading = false
+                self.isSorting = false
+                guard let page = result else { return }
+                self.columns = page.columns
+                self.currentPage = page
+                self.currentOffset = 0
+                self.lastTimingMicros = page.micros
+                self.lastQueryPath = page.path
+                self.didMeasureFromData = false
+                self.measureColumnsFromPage(page)
+                self.rebuildHighlightMask()
+            }
+        }
     }
 
     // MARK: - Windowed loading (never blocks the main thread)
@@ -148,10 +313,31 @@ public final class TableViewModel: ObservableObject {
     /// Rows per page — honours customPageLimit from Banquet, else document's `_head` `page_size`, else 100.
     public var pageLimit: Int { customPageLimit ?? doc.style.pageSize ?? 100 }
 
+    /// True when the active Banquet query contains SQL expressions (e.g. `count(*)`, `min(date)`, `max(date)`),
+    /// `GROUP BY`, `HAVING`, or a complex SQL `WHERE` clause that requires direct SQL execution.
+    public var isCustomBanquetQuery: Bool {
+        let rawColNames = Set(rawColumns.map { $0.name.lowercased() })
+        let hasExprSelect = !banquetSelect.isEmpty && banquetSelect != ["*"] && banquetSelect.contains { !rawColNames.contains($0.lowercased()) }
+        let hasGroup = !(banquetGroupBy ?? "").isEmpty
+        let hasHaving = !(banquetHaving ?? "").isEmpty
+        let hasUnparsedWhere = !(banquetWhereClause ?? "").isEmpty && filters.isEmpty
+        return hasExprSelect || hasGroup || hasHaving || hasUnparsedWhere
+    }
+
     public func loadPage(offset: Int64, limit: Int? = nil) {
+        if displayKind == .summary {
+            runSummaryLoad()
+            return
+        }
         let limit = limit ?? pageLimit
         let clampedOffset = max(0, offset)
         self.currentOffset = clampedOffset
+
+        if isCustomBanquetQuery {
+            runCustomBanquetLoad(offset: clampedOffset, limit: limit)
+            return
+        }
+
         let window = SQLDocCore.Window(
             table: tableName,
             limit: limit,
@@ -167,13 +353,16 @@ public final class TableViewModel: ObservableObject {
 
     public func nextPage() {
         guard let page = currentPage, !page.rows.isEmpty else { return }
-        let limit = page.rows.count
+        let limit = pageLimit
+        let nextOffset = currentOffset + Int64(page.rows.count)
 
         if powerSampleMode { return }
         if !filters.isEmpty {
-            loadPage(offset: currentOffset + Int64(limit))
+            loadPage(offset: nextOffset, limit: limit)
             return
         }
+
+        self.currentOffset = nextOffset
 
         if sortColumn == nil, let lastRowID = page.rowIDs.last {
             // Unsorted sequential scroll: exact O(log n) keyset seek.
@@ -182,7 +371,17 @@ public final class TableViewModel: ObservableObject {
                 limit: limit,
                 after: lastRowID,
                 useAfter: true,
-                offset: currentOffset + Int64(limit)
+                offset: nextOffset
+            )
+            runLoad(window)
+        } else if sortColumn == nil, let pkVals = lastPKValues(on: page) {
+            // WITHOUT ROWID / composite primary key sequential scroll: O(log n) row-value seek.
+            let window = SQLDocCore.Window(
+                table: tableName,
+                limit: limit,
+                useAfter: true,
+                offset: nextOffset,
+                afterPKValues: pkVals
             )
             runLoad(window)
         } else if let sortCol = sortColumn,
@@ -194,7 +393,7 @@ public final class TableViewModel: ObservableObject {
                 limit: limit,
                 after: lastRowID,
                 useAfter: true,
-                offset: currentOffset + Int64(limit),
+                offset: nextOffset,
                 sort: sortCol,
                 desc: isSortDesc,
                 sortNumeric: sortNumeric,
@@ -202,7 +401,7 @@ public final class TableViewModel: ObservableObject {
             )
             runLoad(window)
         } else {
-            loadPage(offset: currentOffset + Int64(limit))
+            loadPage(offset: nextOffset, limit: limit)
         }
     }
 
@@ -223,6 +422,7 @@ public final class TableViewModel: ObservableObject {
     // MARK: - Filters
 
     public func setFilter(column: String, op: ColumnFilter.Op, value: String) {
+        banquetWhereClause = nil
         filters.removeAll { $0.column == column }
         if op.needsValue && value.isEmpty {
             applyFiltersChanged()
@@ -233,14 +433,21 @@ public final class TableViewModel: ObservableObject {
     }
 
     public func clearFilters() {
-        guard !filters.isEmpty else { return }
+        guard !filters.isEmpty || banquetWhereClause != nil else { return }
         filters = []
+        banquetWhereClause = nil
         filteredCount = nil
         loadPage(offset: 0)
     }
 
-    private func applyFiltersChanged() {
-        loadPage(offset: 0)
+    public func removeExtraQueryParam(_ param: String) {
+        extraQueryParams.removeAll { $0 == param }
+    }
+
+    private func applyFiltersChanged(resetOffset: Bool = true) {
+        if resetOffset {
+            loadPage(offset: 0)
+        }
         filterCountTask?.cancel()
         guard !filters.isEmpty else { filteredCount = nil; return }
         let docRef = doc
@@ -295,8 +502,14 @@ public final class TableViewModel: ObservableObject {
     }
 
     public func showAllColumns() {
+        banquetSelect = ["*"]
         hiddenColumns.removeAll()
+        if columns != rawColumns && displayKind != .summary {
+            columns = rawColumns
+            didMeasureFromData = false
+        }
         StatePersistenceManager.shared.saveHiddenColumns(dbID: docID, table: tableName, hidden: [])
+        loadPage(offset: currentOffset)
     }
 
     /// The sort-column value of the last row on a page, for keyset anchoring.
@@ -306,6 +519,25 @@ public final class TableViewModel: ObservableObject {
               let lastRow = page.rows.last,
               colIdx < lastRow.count else { return nil }
         return lastRow[colIdx]
+    }
+
+    /// Primary-key column values (in `pkIndex` order) of the last row on a page,
+    /// used for `WITHOUT ROWID` keyset pagination.
+    private func lastPKValues(on page: Page) -> [SQLiteValue]? {
+        guard let lastRow = page.rows.last else { return nil }
+        let pkCols = columns.filter { $0.pkIndex > 0 }.sorted { $0.pkIndex < $1.pkIndex }
+        guard !pkCols.isEmpty else { return nil }
+        var vals: [SQLiteValue] = []
+        vals.reserveCapacity(pkCols.count)
+        for pkCol in pkCols {
+            guard let idx = columns.firstIndex(where: { $0.name == pkCol.name }),
+                  idx < lastRow.count,
+                  !lastRow[idx].isNull else {
+                return nil
+            }
+            vals.append(lastRow[idx])
+        }
+        return vals
     }
 
     private func runLoad(_ window: SQLDocCore.Window) {
@@ -321,12 +553,89 @@ public final class TableViewModel: ObservableObject {
                 self.isLoading = false
                 self.isSorting = false
                 guard let page = result else { return }
+                if self.columns != self.rawColumns && self.displayKind != .summary {
+                    self.columns = self.rawColumns
+                    self.didMeasureFromData = false
+                }
+                self.queryError = nil
+                self.customQueryRowCount = nil
                 self.currentPage = page
                 self.currentOffset = page.start
                 self.lastTimingMicros = page.micros
                 self.lastQueryPath = page.path
                 self.measureColumnsFromPage(page)
                 self.rebuildHighlightMask()
+            }
+        }
+    }
+
+    private func runCustomBanquetLoad(offset: Int64, limit: Int) {
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        self.isLoading = true
+        let docRef = doc
+        let table = tableName
+
+        let whereStr: String?
+        if let rawW = banquetWhereClause, !rawW.isEmpty {
+            whereStr = rawW
+        } else if !filters.isEmpty {
+            let clauses = filters.map { f -> String in
+                let val = f.value.replacingOccurrences(of: "'", with: "''")
+                switch f.op {
+                case .equals: return "\(f.column) = '\(val)'"
+                case .notEquals: return "\(f.column) != '\(val)'"
+                case .contains: return "\(f.column) LIKE '%\(val)%'"
+                case .startsWith: return "\(f.column) LIKE '\(val)%'"
+                case .greater: return "\(f.column) > \(val)"
+                case .less: return "\(f.column) < \(val)"
+                case .isNull: return "\(f.column) IS NULL"
+                case .isNotNull: return "\(f.column) IS NOT NULL"
+                }
+            }
+            whereStr = clauses.joined(separator: " AND ")
+        } else {
+            whereStr = nil
+        }
+
+        let b = Banquet(
+            table: table,
+            select: banquetSelect,
+            sortColumn: sortColumn,
+            isSortDesc: isSortDesc,
+            whereClause: whereStr,
+            limit: limit,
+            offset: Int(offset),
+            groupBy: banquetGroupBy,
+            having: banquetHaving
+        )
+        let sql = BanquetComposer.compose(b)
+
+        Task.detached(priority: .userInitiated) {
+            do {
+                let page = try docRef.banquetPage(sql: sql, table: table, startOffset: offset)
+                await MainActor.run { [weak self] in
+                    guard let self, generation == self.loadGeneration else { return }
+                    self.isLoading = false
+                    self.isSorting = false
+                    self.queryError = nil
+                    self.customQueryRowCount = page.rows.count
+                    self.columns = page.columns
+                    self.currentPage = page
+                    self.currentOffset = page.start
+                    self.lastTimingMicros = page.micros
+                    self.lastQueryPath = page.path
+                    self.didMeasureFromData = false
+                    self.measureColumnsFromPage(page)
+                    self.rebuildHighlightMask()
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard let self, generation == self.loadGeneration else { return }
+                    self.isLoading = false
+                    self.isSorting = false
+                    self.queryError = error.localizedDescription
+                }
             }
         }
     }
@@ -384,23 +693,41 @@ public final class TableViewModel: ObservableObject {
 
     /// Applies query parameters, sort, filters, column projection, and slice offset from a parsed Banquet object.
     public func applyBanquet(_ banquet: Banquet) {
+        let oldSortCol = self.sortColumn
+        let oldSortDesc = self.isSortDesc
+        let oldFilters = self.filters
+
         // 1. Sort
         if let sortCol = banquet.sortColumn, !sortCol.isEmpty {
             self.sortColumn = sortCol
             self.isSortDesc = banquet.isSortDesc
+            self.sortNumeric = columns.first(where: { $0.name == sortCol })?.isNumeric ?? false
         } else {
             self.sortColumn = nil
             self.isSortDesc = false
+            self.sortNumeric = false
         }
-        self.isSorting = true
-        persistSort()
+        let sortChanged = (oldSortCol != self.sortColumn || oldSortDesc != self.isSortDesc)
+        if sortChanged {
+            self.isSorting = true
+            persistSort()
+        }
 
-        // 2. Select projection (visible / hidden columns)
-        if banquet.select != ["*"] && !banquet.select.isEmpty {
-            let selectSet = Set(banquet.select)
+        // 2. Select projection (visible / hidden columns or custom SQL expressions)
+        self.banquetSelect = banquet.select.isEmpty ? ["*"] : banquet.select
+        let rawColNames = Set(rawColumns.map { $0.name.lowercased() })
+        let hasExprSelect = !self.banquetSelect.isEmpty && self.banquetSelect != ["*"] && self.banquetSelect.contains { !rawColNames.contains($0.lowercased()) }
+
+        if hasExprSelect {
+            self.hiddenColumns = []
+            if self.displayKind == .trim {
+                self.displayKind = .raw
+            }
+        } else if banquet.select != ["*"] && !banquet.select.isEmpty {
+            let selectSet = Set(banquet.select.map { $0.lowercased() })
             var newHidden = Set<String>()
-            for col in columns {
-                if !selectSet.contains(col.name) {
+            for col in rawColumns {
+                if !selectSet.contains(col.name.lowercased()) {
                     newHidden.insert(col.name)
                 }
             }
@@ -409,22 +736,40 @@ public final class TableViewModel: ObservableObject {
             self.hiddenColumns = []
         }
 
-        // 3. Limit / Page Size
-        if let limit = banquet.limit {
+        // 3. GroupBy & Having preservation
+        self.banquetGroupBy = banquet.groupBy
+        self.banquetHaving = banquet.having
+        self.banquetWhereClause = banquet.whereClause
+        self.extraQueryParams = banquet.extraQueryParams
+        self.rawQuery = banquet.rawQuery
+
+        // 4. Limit / Page Size
+        if let limit = banquet.limit, limit > 0 {
             self.customPageLimit = limit
         } else {
             self.customPageLimit = nil
         }
 
-        // 4. Filters & Where clause
+        // 5. Filters & Where clause
         let parsedFilters = ColumnFilter.parseConditions(banquet.whereClause ?? "")
+        let filtersChanged = (oldFilters != parsedFilters)
         self.filters = parsedFilters
+        if filtersChanged {
+            applyFiltersChanged(resetOffset: false)
+        }
 
-        // 5. Offset & Query
-        let offset = banquet.offset.map { Int64($0) } ?? 0
-        applyFiltersChanged()
-        if offset > 0 {
-            loadPage(offset: offset)
+        // 6. Slice Offset & Execution
+        let targetOffset = Int64(max(0, banquet.offset ?? 0))
+        let targetLimit = banquet.limit ?? pageLimit
+        if !sortChanged && !filtersChanged,
+           let page = currentPage,
+           !page.rows.isEmpty,
+           targetOffset == currentOffset + Int64(page.rows.count),
+           targetLimit == pageLimit {
+            // Fast O(log N) keyset step for sequential forward pagination via Banquet URL slice
+            nextPage()
+        } else {
+            loadPage(offset: targetOffset, limit: targetLimit)
         }
     }
 
