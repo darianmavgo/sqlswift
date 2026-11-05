@@ -94,6 +94,26 @@ swift build -c release --arch x86_64
 lipo -create -output sqldoc .build/{arm64,x86_64}-apple-macosx/release/sqldoc
 ```
 
+## UI feedback loop (dev app only)
+
+The dev app (`bin/SqlSwift.app`, run via `make hot`) writes two plain-text files
+beside itself via `Sources/SQLDocApp/Utilities/UILog.swift`; debug builds only:
+
+- `bin/ui.log` — timestamped `[category] event  key=value…` lines (nav, bar, grid,
+  banquet, error). Previous run is kept as `ui.log.prev`. `make uilog` tails it.
+- `bin/ui-state.json` — debounced snapshot of what the window shows: open doc/table,
+  the Banquet URL in the bar, display kind, visible columns, sort, rows loaded,
+  last query path/timing. `make uistate` prints it.
+- `bin/ui-command.txt` — write one command per line and the dev app runs it, then
+  deletes the file (`UICommands.swift`): `url <banquet url>`, `sort <col> [desc]`,
+  `filter <col> <op> <value>`, `clearfilters`, `display raw|trim|summary`,
+  `hide <col>`, `showall`, `page next|prev|first|last`, `size <n>`, `table <name>`.
+  Wait ~1.5s, then read `ui-state.json` and compare `banquetURL` with `grid`.
+
+Claude: after changing UI behavior, run `make hot`, drive the app, then read both
+files instead of guessing. Add `UILog.event("cat", "msg", [k: v])` at new
+interaction points. Also streams to `log stream --predicate 'subsystem == "com.mavgo.sqlswift"'`.
+
 ## Layout
 
 ```

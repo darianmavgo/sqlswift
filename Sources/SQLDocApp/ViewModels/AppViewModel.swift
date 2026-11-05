@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 import SQLDocCore
 
 public struct CellInspectInfo: Identifiable, @unchecked Sendable {
@@ -30,12 +31,17 @@ public enum FolderSortOrder: String, CaseIterable, Sendable {
 
 @MainActor
 public final class AppViewModel: ObservableObject {
-    @Published public var activeDocEntry: DocEntry?
+    @Published public var activeDocEntry: DocEntry? {
+        didSet { saveHotReloadSession() }
+    }
     @Published public var openDocuments: [DocEntry] = []
     @Published public var recentItems: [RecentItem] = []
     @Published public var workspaceItems: [RecentItem] = []
     @Published public var selectedTableName: String = "" {
-        didSet { saveHotReloadSession() }
+        didSet {
+            if selectedTableName != oldValue { UILog.event("nav", "select table", ["table": selectedTableName]) }
+            saveHotReloadSession()
+        }
     }
     @Published public var isFolderBrowserVisible: Bool = false {
         didSet { saveHotReloadSession() }
@@ -54,7 +60,9 @@ public final class AppViewModel: ObservableObject {
     @Published public var isScanningFolder: Bool = false
     @Published public var isFindBarVisible: Bool = false
     @Published public var zoomScale: Double = 1.0
-    @Published public var errorMessage: String? = nil
+    @Published public var errorMessage: String? = nil {
+        didSet { if let e = errorMessage { UILog.event("error", e) } }
+    }
     @Published public var isDropTargeted: Bool = false
 
     // State persistence & Settings
@@ -79,6 +87,69 @@ public final class AppViewModel: ObservableObject {
     @Published public var showQueryConsole: Bool = false
     @Published public var showJumpToRow: Bool = false
     @Published public var showSidebar: Bool = true
+    @Published public var showRowDetail: Bool = false
+
+    /// Mirror of the table view-model on screen, so menu commands can act on it.
+    /// Its changes are forwarded so menu check marks stay current.
+    public private(set) var activeTableVM: TableViewModel?
+    private var activeTableVMObserver: AnyCancellable?
+
+    public func setActiveTableVM(_ vm: TableViewModel?) {
+        guard activeTableVM !== vm else { return }
+        activeTableVM = vm
+        activeTableVMObserver = vm?.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+        objectWillChange.send()
+    }
+
+    /// What the window is showing right now, for `bin/ui-state.json`. Includes the
+    /// Banquet URL the bar renders so a mismatch with the grid is visible at a glance.
+    public func uiStateSnapshot() -> [String: Any] {
+        var s: [String: Any] = [
+            "doc": activeDocEntry?.path ?? "",
+            "table": selectedTableName,
+            "folderBrowserVisible": isFolderBrowserVisible,
+            "sidebar": showSidebar,
+            "rowDetailPanel": showRowDetail,
+            "bannerError": errorMessage ?? "",
+            "banquetBarEditing": isBanquetBarEditing,
+            "banquetURL": banquetURLString(for: activeTableVM),
+            "banquetBarText": banquetBarText,
+            "folder": [
+                "path": currentFolderPath,
+                "subfolder": selectedSubfolder ?? "",
+                "dbCount": folderFiles.count,
+                "dbs": folderFiles.prefix(12).map { URL(fileURLWithPath: $0.path).lastPathComponent },
+                "sort": "\(folderSortOrder)",
+            ] as [String: Any],
+        ]
+        if let sel = selectedCell { s["selectedCell"] = ["row": sel.row, "col": sel.col] }
+        if let vm = activeTableVM {
+            s["grid"] = [
+                "displayKind": vm.displayKind.rawValue,
+                "visibleColumns": vm.visibleColumns.map(\.name),
+                "totalColumns": vm.columns.count,
+                "sort": vm.sortColumn.map { ($0, vm.isSortDesc ? "desc" : "asc") }.map { "\($0.0) \($0.1)" } ?? "",
+                "filters": vm.filters.count,
+                "offset": vm.currentOffset,
+                "pageLimit": vm.pageLimit,
+                "rowsLoaded": vm.currentPage?.rows.count ?? 0,
+                "queryPath": vm.lastQueryPath,
+                "queryMicros": vm.lastTimingMicros,
+                "isLoading": vm.isLoading,
+                "thinTable": isThinTable,
+            ] as [String: Any]
+        }
+        return s
+    }
+
+    /// Detail panel is only offered where the grid has horizontal room.
+    public static let thinTableMaxColumns = 8
+    public var isThinTable: Bool {
+        guard let vm = activeTableVM else { return false }
+        return vm.displayKind != .summary && vm.visibleColumns.count <= Self.thinTableMaxColumns
+    }
 
     // Selection state
     @Published public var selectedCell: (row: Int, col: Int)? = nil
@@ -86,8 +157,12 @@ public final class AppViewModel: ObservableObject {
 
     // Banquet Bar state
     @Published public var isBanquetBarEditing: Bool = false
-    @Published public var banquetBarText: String = ""
+    /// What the Banquet bar field currently shows. Deliberately not @Published (every
+    /// keystroke would re-render observers); read only by the UI-state snapshot.
+    public var banquetBarText: String = ""
     @Published public var banquetBarPendingPaste: String? = nil
+    /// Dev-only (UICommands `type`): replaces the bar text as if the user typed it.
+    @Published public var banquetBarInjectedText: String? = nil
     @Published public var banquetCopiedFeedback: Bool = false
     @Published public var pendingBanquet: Banquet? = nil
     @Published public var pendingDrillDown: (table: String, filters: [ColumnFilter])? = nil
@@ -258,6 +333,7 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func open(path: String, isImmutable: Bool = false, targetTable: String? = nil) {
+        UILog.event("nav", "open", ["path": path, "table": targetTable ?? "-"])
         let resolved = FolderScanner.resolveLocalPath(path)
         if FolderScanner.isDirectory(resolved) {
             openFolder(path: resolved, showBrowser: true)
@@ -390,6 +466,7 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func closeCurrentDoc() {
+        UILog.event("nav", "close doc")
         if let active = activeDocEntry {
             closeDoc(id: active.id)
         }
@@ -499,9 +576,9 @@ public final class AppViewModel: ObservableObject {
         // Preserve explicit column projection if set via Banquet or manual column hiding
         let selectCols: [String]
         if let tableVM {
-            if !tableVM.hiddenColumns.isEmpty {
-                let visible = tableVM.columns.filter { !tableVM.hiddenColumns.contains($0.name) }.map(\.name)
-                selectCols = visible.isEmpty ? ["*"] : visible
+            let projected = tableVM.projectedColumnNames
+            if !projected.isEmpty {
+                selectCols = projected
             } else if tableVM.banquetSelect != ["*"] && !tableVM.banquetSelect.isEmpty {
                 selectCols = tableVM.banquetSelect
             } else {
@@ -657,6 +734,7 @@ public final class AppViewModel: ObservableObject {
 
     /// Navigates to a Banquet URL or local file/folder path: resolves dataset path, folder, table, sort, and filters.
     public func openBanquet(urlString: String, activeTableVM: TableViewModel? = nil) {
+        UILog.event("banquet", "open url", ["url": urlString])
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 

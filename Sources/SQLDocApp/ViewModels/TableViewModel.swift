@@ -21,7 +21,13 @@ public final class TableViewModel: ObservableObject {
     @Published public var isSorting: Bool = false
 
     // Virtualized window state
-    @Published public var currentPage: Page?
+    @Published public var currentPage: Page? {
+        didSet {
+            if let p = currentPage {
+                UILog.event("grid", "page arrived", ["table": tableName, "rows": p.rows.count, "start": p.start, "path": p.path, "micros": p.micros])
+            }
+        }
+    }
     @Published public var currentOffset: Int64 = 0
 
     // Search / Find state matching sqldoc
@@ -88,6 +94,15 @@ public final class TableViewModel: ObservableObject {
         case .summary:
             return columns.filter { !hiddenColumns.contains($0.name) }
         }
+    }
+
+    /// Names of the columns the grid is actually showing, or empty when it shows
+    /// them all. Lets the Banquet bar reflect Trim mode and hidden columns, not
+    /// just columns hidden by hand.
+    public var projectedColumnNames: [String] {
+        guard displayKind != .summary else { return [] }
+        let shown = visibleColumns.map(\.name)
+        return shown.isEmpty || shown.count == columns.count ? [] : shown
     }
 
     private var findTask: Task<Void, Never>?
@@ -213,6 +228,7 @@ public final class TableViewModel: ObservableObject {
 
     public func setDisplayKind(_ kind: DisplayKind) {
         guard displayKind != kind else { return }
+        UILog.event("grid", "display kind", ["from": displayKind.rawValue, "to": kind.rawValue])
         let wasSummary = (displayKind == .summary)
         displayKind = kind
 
@@ -265,6 +281,7 @@ public final class TableViewModel: ObservableObject {
     }
 
     public func setFilters(_ newFilters: [ColumnFilter]) {
+        UILog.event("grid", "filters", ["count": newFilters.count])
         self.filters = newFilters
         self.banquetWhereClause = nil
         applyFiltersChanged()
@@ -325,6 +342,7 @@ public final class TableViewModel: ObservableObject {
     }
 
     public func loadPage(offset: Int64, limit: Int? = nil) {
+        UILog.event("grid", "load page", ["table": tableName, "offset": offset, "kind": displayKind.rawValue])
         if displayKind == .summary {
             runSummaryLoad()
             return
@@ -663,6 +681,7 @@ public final class TableViewModel: ObservableObject {
     }
 
     public func setSort(column: String?, desc: Bool, numeric: Bool? = nil) {
+        UILog.event("grid", "sort", ["column": column ?? "-", "desc": desc])
         sortColumn = column
         isSortDesc = desc
         if let column {

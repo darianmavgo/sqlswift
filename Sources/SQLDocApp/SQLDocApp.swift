@@ -151,6 +151,23 @@ struct SqlSwiftApp: App {
 
                 Divider()
 
+                Picker("Column View", selection: Binding(
+                    get: { appVM.activeTableVM?.displayKind ?? .raw },
+                    set: { appVM.activeTableVM?.setDisplayKind($0) }
+                )) {
+                    ForEach(DisplayKind.allCases, id: \.self) { kind in
+                        Text(kind.label).tag(kind)
+                    }
+                }
+                .pickerStyle(.inline)
+                .disabled(appVM.activeTableVM == nil)
+
+                Toggle("Row Detail Panel", isOn: $appVM.showRowDetail)
+                    .keyboardShortcut("d", modifiers: [.command, .option])
+                    .disabled(!appVM.isThinTable)
+
+                Divider()
+
                 Menu("Appearance") {
                     Button("Match System") {
                         appVM.setThemeMode(.system)
@@ -217,6 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        UILog.startSession()
         startHotReloadWatcher()
     }
 

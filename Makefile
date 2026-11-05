@@ -10,7 +10,7 @@ export SWIFTPM_MODULECACHE_OVERRIDE ?= /tmp/swiftpm-cache
 SWIFT ?= /usr/bin/swift
 SWIFT_FLAGS ?= --disable-sandbox
 
-.PHONY: all build release test clean install install-cli install-app uninstall app bench config generate icons config-check buildinfo lsclean lslist
+.PHONY: all build release test clean install install-cli install-app uninstall app bench config generate icons config-check buildinfo lsclean lslist uilog uistate
 
 LSREGISTER = /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 BUNDLE_ID  = com.mavgo.sqlswift
@@ -141,6 +141,13 @@ bench: release
 
 watch hot:
 	@sh scripts/hot-reload.sh
+
+# Dev-app UI feedback loop: event stream + current-state snapshot (see CLAUDE.md).
+uilog:
+	@tail -n 200 -f bin/ui.log
+
+uistate:
+	@cat bin/ui-state.json
 
 clean:
 	@rm -rf .build bin testdata/*.db

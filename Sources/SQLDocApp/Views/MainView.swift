@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import SQLDocCore
 import UniformTypeIdentifiers
 
@@ -7,6 +8,7 @@ public struct MainView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var tableVMCache: [String: TableViewModel] = [:]
     @State private var activeTableVM: TableViewModel?
+    @State private var uiCommands = UICommandRunner()
 
     public init(appVM: AppViewModel = AppViewModel()) {
         self._appVM = ObservedObject(wrappedValue: appVM)
@@ -54,7 +56,15 @@ public struct MainView: View {
         .ignoresSafeArea(.container, edges: .top)
         .accentColor(appVM.activeDocEntry != nil ? AppTheme.color(from: appVM.activeDocEntry!.doc.style.accent) : Color.accentColor)
         .preferredColorScheme(appVM.effectiveColorScheme)
-        .onAppear { syncActiveTableVM() }
+        .onAppear {
+            syncActiveTableVM()
+            uiCommands.start(appVM: appVM)
+        }
+        // Debounced so a burst of view-model changes writes one snapshot.
+        .onReceive(appVM.objectWillChange.debounce(for: .milliseconds(300), scheduler: RunLoop.main)) { _ in
+            guard UILog.isEnabled else { return }
+            UILog.writeSnapshot(appVM.uiStateSnapshot())
+        }
         .onChange(of: appVM.selectedTableName) { _, _ in syncActiveTableVM() }
         .onChange(of: appVM.activeDocEntry?.id) { _, _ in syncActiveTableVM() }
         .sheet(item: $appVM.inspectingCell) { info in
@@ -95,6 +105,16 @@ public struct MainView: View {
     }
 
     private var contentArea: some View {
+        HStack(spacing: 0) {
+            gridArea
+            if appVM.showRowDetail, appVM.isThinTable, !appVM.isFolderBrowserVisible,
+               let activeTableVM {
+                RowDetailPanel(appVM: appVM, tableVM: activeTableVM)
+            }
+        }
+    }
+
+    private var gridArea: some View {
         ZStack {
             ZStack {
                 if appVM.isFolderBrowserVisible || appVM.activeDocEntry == nil {
@@ -158,6 +178,7 @@ public struct MainView: View {
 
         guard let entry = appVM.activeDocEntry, !appVM.selectedTableName.isEmpty else {
             activeTableVM = nil
+            appVM.setActiveTableVM(nil)
             return
         }
         let key = "\(entry.id):\(appVM.selectedTableName)"
@@ -179,6 +200,7 @@ public struct MainView: View {
             appVM.pendingBanquet = nil
         }
         activeTableVM = vm
+        appVM.setActiveTableVM(vm)
     }
 
 
