@@ -94,6 +94,45 @@ public final class AppViewModel: ObservableObject {
     public private(set) var activeTableVM: TableViewModel?
     private var activeTableVMObserver: AnyCancellable?
 
+    private var tableVMCache: [String: TableViewModel] = [:]
+
+    /// Resolves the table view-model for the current doc + table selection.
+    /// Called from lifecycle callbacks (never during `body` evaluation) whenever the
+    /// active document or table changes. Evicts view-models for databases that are
+    /// no longer open (freeing their pages and background observers), and applies
+    /// any pending drill-down / Banquet query to the resolved view-model.
+    public func syncActiveTableVM() {
+        let openIDs = Set(openDocuments.map { $0.id })
+        for (key, vm) in tableVMCache where !openIDs.contains(String(key.split(separator: ":").first ?? "")) {
+            vm.dispose()
+            tableVMCache.removeValue(forKey: key)
+        }
+
+        guard let entry = activeDocEntry, !selectedTableName.isEmpty else {
+            setActiveTableVM(nil)
+            return
+        }
+        let key = "\(entry.id):\(selectedTableName)"
+        let vm: TableViewModel
+        if let existing = tableVMCache[key] {
+            vm = existing
+        } else {
+            let created = TableViewModel(doc: entry.doc, tableName: selectedTableName, docID: entry.id)
+            tableVMCache[key] = created
+            vm = created
+        }
+        if let drill = pendingDrillDown, drill.table == selectedTableName {
+            vm.setFilters(drill.filters)
+            pendingDrillDown = nil
+        }
+        if let pending = pendingBanquet,
+           pending.table.isEmpty || pending.table == selectedTableName {
+            vm.applyBanquet(pending)
+            pendingBanquet = nil
+        }
+        setActiveTableVM(vm)
+    }
+
     public func setActiveTableVM(_ vm: TableViewModel?) {
         guard activeTableVM !== vm else { return }
         activeTableVM = vm

@@ -83,10 +83,13 @@ release (git submodule or a `curl` in the Makefile).
 
 The bar itself is 100% native and shared with nobody:
 
-- **`BanquetBarView`** — an editable field that also renders breadcrumb
-  segments, macOS path-bar style. Segments come from the *parsed model*
-  (`dataset / table / -Open[0:25]`), not string splitting; clicking one
-  truncates the query there.
+- **`BanquetBarView`** — a single always-editable text field (no separate
+  display/edit modes). The grid is the source of truth: the field is rewritten
+  whenever the view models publish a change, and edits are applied to the open
+  table ~300 ms after typing stops when they form a complete, valid query for it
+  (Return is still required to switch document/table or run SQL expressions).
+  While focused, the field never rewrites text being typed; on blur it shows the
+  grid's canonical URL again.
 - **Parse-in:** type or paste a Banquet string → `Banquet.parse` → a
   `QueryIntent` the view model applies: open the doc if `dataset` changed,
   select `table`, push `sort`/`where`/`select`/`slice` onto the grid (mapped
@@ -100,6 +103,35 @@ The bar itself is 100% native and shared with nobody:
 - **Entry points:** `sqldoc "history.db/mytable/-Open"` on the CLI, an
   `x-banquet:` URL scheme via `application(_:open:)`, drag a Banquet URL onto
   the window.
+
+## Sort markers and the column list
+
+`+col` (ascending) and `-col` (descending) are **sort markers that also name a
+shown column**. This is a sqlswift rule; the upstream grammar is silent on it.
+
+| URL | Sort | Columns shown |
+|---|---|---|
+| `t/-Open` | Open desc | all (`*`) — a marker on its own is sort-only |
+| `t/id,-Open,Close` | Open desc | `id, Open, Close` — marker keeps its written position |
+| `t/id,Close?sort=Open&order=desc` | Open desc | `id, Close` — sort by a column that is *not* shown |
+
+- Parsing: when the path lists any plain column, every marked column is
+  included in the select list at its written position. With no plain column,
+  select stays `*`.
+- Serializing (`BanquetSerializer.canonicalString`): if the sort column is among
+  the projected columns it is written inline as `+col`/`-col`; if it was hidden
+  from the grid, the sort moves to `?sort=col[&order=desc]` so the URL does not
+  silently re-show the column. `order` is omitted for ascending.
+- Before this rule `id,-Open` meant "sort by Open, show only `id`", so a sorted
+  column silently vanished from the query text.
+
+## Query string defaults to WHERE
+
+Any non-reserved `?` parameter with a comparison operator is a `WHERE`
+condition (`?id>6000` ≡ `?where=id>6000`). Normative text lives in the banquet
+repo, `docs/banquet-url-syntax.md` §6. sqlswift implements it in
+`BanquetParser.parseBareConditions` and re-serializes the result as
+`?where=…`, so the bar normalizes `?id>6000` to `?where=id > 6000`.
 
 ## 5. Codegen tie-in
 

@@ -74,7 +74,9 @@ modified copy in the working tree is normal and harmless. `config-check` exclude
 ```sh
 make build          # generate + buildinfo + debug build
 make release        # release build
-make test           # swift run SQLDocTestsRunner
+make test           # swift run SQLDocTestsRunner (engine/parser)
+make ui-test        # swift test: headless Swift Testing over the view models
+make ui-e2e         # replay the same Banquet cases in the running dev app (make hot first)
 make app            # assemble bin/sqldoc.app + bin/sqldoc (release)
 make install        # /Applications/sqldoc.app + ~/.local/bin/sqldoc, then lsclean
 make bench          # build + benchmark against testdata/sample.db
@@ -109,6 +111,9 @@ beside itself via `Sources/SQLDocApp/Utilities/UILog.swift`; debug builds only:
   `filter <col> <op> <value>`, `clearfilters`, `display raw|trim|summary`,
   `hide <col>`, `showall`, `page next|prev|first|last`, `size <n>`, `table <name>`.
   Wait ~1.5s, then read `ui-state.json` and compare `banquetURL` with `grid`.
+
+Banquet URL ⇄ grid cases live in `Tests/SQLDocAppTests/banquet-ui-cases.json`, shared by
+`make ui-test` and `make ui-e2e`; add a case there when fixing a bar/grid bug.
 
 Claude: after changing UI behavior, run `make hot`, drive the app, then read both
 files instead of guessing. Add `UILog.event("cat", "msg", [k: v])` at new

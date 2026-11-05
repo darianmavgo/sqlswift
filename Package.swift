@@ -56,6 +56,13 @@ let package = Package(
             name: "SQLDocTestsRunner",
             dependencies: ["SQLDocCore"],
             path: "Tests/SQLDocTestsRunner"
+        ),
+        // `swift test`: headless UI tests over the app's view models (Swift Testing).
+        .testTarget(
+            name: "SQLDocAppTests",
+            dependencies: ["SQLDocApp", "SQLDocCore"],
+            path: "Tests/SQLDocAppTests",
+            resources: [.copy("banquet-ui-cases.json")]
         )
     ]
 )

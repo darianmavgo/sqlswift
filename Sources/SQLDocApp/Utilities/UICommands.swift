@@ -45,6 +45,12 @@ final class UICommandRunner {
 
     private func run(_ line: String) {
         guard let appVM else { return }
+        Self.execute(line, appVM: appVM)
+    }
+
+    /// Runs one command line against `appVM`. Shared with the headless UI tests
+    /// (`Tests/SQLDocAppTests`) so they drive the app through the same verbs.
+    static func execute(_ line: String, appVM: AppViewModel) {
         UILog.event("cmd", line)
         let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
         let verb = parts[0]

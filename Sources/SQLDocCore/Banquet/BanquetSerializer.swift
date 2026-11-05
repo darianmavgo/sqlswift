@@ -36,15 +36,30 @@ public enum BanquetSerializer {
         // Column / Sort / Slice modifiers in path
         var pathModifiers: [String] = []
 
-        // Sort modifier (+col or -col)
-        if let sortCol = banquet.sortColumn, !sortCol.isEmpty {
-            let prefix = banquet.isSortDesc ? "-" : "+"
-            pathModifiers.append("\(prefix)\(sortCol)")
-        }
-
-        // Select columns (if specific and not wildcard)
-        if !banquet.select.isEmpty && banquet.select != ["*"] {
-            pathModifiers.append(banquet.select.joined(separator: ","))
+        // Sort marker (+col / -col) sits inside the column list, so a sorted column
+        // is always shown. Sorting by a column that is projected out can't be
+        // written that way — it goes in `?sort=…&order=desc` instead.
+        var sortParams: [String] = []
+        let sortCol = banquet.sortColumn ?? ""
+        let hasProjection = !banquet.select.isEmpty && banquet.select != ["*"]
+        let marker = banquet.isSortDesc ? "-" : "+"
+        if hasProjection {
+            if !sortCol.isEmpty, banquet.select.contains(where: { $0.lowercased() == sortCol.lowercased() }) {
+                var marked = false
+                let cols = banquet.select.map { c -> String in
+                    if !marked, c.lowercased() == sortCol.lowercased() { marked = true; return marker + c }
+                    return c
+                }
+                pathModifiers.append(cols.joined(separator: ","))
+            } else {
+                pathModifiers.append(banquet.select.joined(separator: ","))
+                if !sortCol.isEmpty {
+                    sortParams.append("sort=\(sortCol)")
+                    if banquet.isSortDesc { sortParams.append("order=desc") }
+                }
+            }
+        } else if !sortCol.isEmpty {
+            pathModifiers.append("\(marker)\(sortCol)")
         }
 
         if !pathModifiers.isEmpty {
@@ -69,6 +84,8 @@ public enum BanquetSerializer {
         if let whereClause = banquet.whereClause, !whereClause.isEmpty {
             queryParams.append("where=\(whereClause)")
         }
+
+        queryParams.append(contentsOf: sortParams)
 
         if let groupBy = banquet.groupBy, !groupBy.isEmpty {
             queryParams.append("groupby=\(groupBy)")

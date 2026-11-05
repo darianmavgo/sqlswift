@@ -6,7 +6,6 @@ import UniformTypeIdentifiers
 public struct MainView: View {
     @ObservedObject public var appVM: AppViewModel
     @Environment(\.colorScheme) private var colorScheme
-    @State private var tableVMCache: [String: TableViewModel] = [:]
     @State private var activeTableVM: TableViewModel?
     @State private var uiCommands = UICommandRunner()
 
@@ -165,44 +164,12 @@ public struct MainView: View {
     }
 
 
-    /// Resolves the table view-model for the current doc + table selection.
-    /// Runs from lifecycle callbacks, never during `body` evaluation, and evicts
-    /// view-models for databases that are no longer open (freeing their pages and
-    /// background observers).
+    /// The lifecycle logic lives in `AppViewModel.syncActiveTableVM` (so tests can
+    /// drive it); this just mirrors the result into view state.
     private func syncActiveTableVM() {
-        let openIDs = Set(appVM.openDocuments.map { $0.id })
-        for (key, vm) in tableVMCache where !openIDs.contains(String(key.split(separator: ":").first ?? "")) {
-            vm.dispose()
-            tableVMCache.removeValue(forKey: key)
-        }
-
-        guard let entry = appVM.activeDocEntry, !appVM.selectedTableName.isEmpty else {
-            activeTableVM = nil
-            appVM.setActiveTableVM(nil)
-            return
-        }
-        let key = "\(entry.id):\(appVM.selectedTableName)"
-        let vm: TableViewModel
-        if let existing = tableVMCache[key] {
-            vm = existing
-        } else {
-            let created = TableViewModel(doc: entry.doc, tableName: appVM.selectedTableName, docID: entry.id)
-            tableVMCache[key] = created
-            vm = created
-        }
-        if let drill = appVM.pendingDrillDown, drill.table == appVM.selectedTableName {
-            vm.setFilters(drill.filters)
-            appVM.pendingDrillDown = nil
-        }
-        if let pending = appVM.pendingBanquet,
-           pending.table.isEmpty || pending.table == appVM.selectedTableName {
-            vm.applyBanquet(pending)
-            appVM.pendingBanquet = nil
-        }
-        activeTableVM = vm
-        appVM.setActiveTableVM(vm)
+        appVM.syncActiveTableVM()
+        activeTableVM = appVM.activeTableVM
     }
-
 
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
         for provider in providers {

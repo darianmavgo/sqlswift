@@ -380,7 +380,7 @@ func runAllTests() async {
         let b2 = try BanquetParser.parse("database.sqlite;customers;id,name,+age?where=age>18&limit=50")
         expectEqual(b2.dataSetPath, "database.sqlite")
         expectEqual(b2.table, "customers")
-        expectEqual(b2.select, ["id", "name"])
+        expectEqual(b2.select, ["id", "name", "age"])
         expectEqual(b2.sortColumn, "age")
         expectEqual(b2.isSortDesc, false)
         expectEqual(b2.whereClause, "age>18")
@@ -399,6 +399,45 @@ func runAllTests() async {
         let bCsv = try BanquetParser.parse("sample.csv/Name,City")
         expectEqual(bCsv.dataSetPath, "sample.csv")
         expectEqual(bCsv.select, ["Name", "City"])
+
+        // Sort marker + other columns: the sorted column is shown, in written position.
+        let bSortCols = try BanquetParser.parse("t.db/telemetry/id,+temperature,humidity[0:10]")
+        expectEqual(bSortCols.sortColumn, "temperature")
+        expectEqual(bSortCols.select, ["id", "temperature", "humidity"])
+        // Sort alone stays sort-only.
+        expectEqual(try BanquetParser.parse("t.db/telemetry/-id").select, ["*"])
+        // Round trip, and the projected-out sort column falls back to ?sort=
+        let rt = BanquetSerializer.canonicalString(for: bSortCols)
+        expectEqual(try BanquetParser.parse(rt).select, ["id", "temperature", "humidity"])
+        let hidden = Banquet(dataSetPath: "t.db", table: "telemetry", select: ["id"], sortColumn: "temperature", isSortDesc: true)
+        let hiddenURL = BanquetSerializer.canonicalString(for: hidden)
+        expectTrue(hiddenURL.contains("telemetry/id?sort=temperature&order=desc"))
+        let hiddenBack = try BanquetParser.parse(hiddenURL)
+        expectEqual(hiddenBack.sortColumn, "temperature")
+        expectEqual(hiddenBack.isSortDesc, true)
+        expectEqual(hiddenBack.select, ["id"])
+
+        // Non-reserved `?` params default to WHERE conditions.
+        let bBare = try BanquetParser.parse("t.db/telemetry/id,temperature[0:20]?id>6000")
+        expectEqual(bBare.whereClause, "id>6000")
+        expectEqual(bBare.extraQueryParams, [])
+        let bBare2 = try BanquetParser.parse("t.db/telemetry?device_id=3&id>6000&where=temperature<20&limit=5")
+        expectEqual(bBare2.whereClause, "temperature<20 AND device_id = 3 AND id>6000")
+        expectEqual(bBare2.limit, 5)
+        expectEqual(try BanquetParser.parse("t.db/telemetry?id>6000").whereClause, "id>6000")
+        // Comparison in the path: filters, and a marker keeps just the column name.
+        let bCmp = try BanquetParser.parse("t.db/telemetry/+id>6000,temperature,humidity[0:100]")
+        expectEqual(bCmp.sortColumn, "id")
+        expectEqual(bCmp.isSortDesc, false)
+        expectEqual(bCmp.select, ["id", "temperature", "humidity"])
+        expectEqual(bCmp.whereClause, "id > 6000")
+        let bCmp2 = try BanquetParser.parse("t.db/telemetry/temperature,age<=30,name")
+        expectEqual(bCmp2.select, ["temperature", "name"])
+        expectEqual(bCmp2.whereClause, "age <= 30")
+        expectEqual(bCmp2.sortColumn, nil)
+        let bNoOp = try BanquetParser.parse("t.db/telemetry?foo")
+        expectEqual(bNoOp.whereClause, nil)
+        expectEqual(bNoOp.extraQueryParams, ["foo"])
 
         let bFilter = try BanquetParser.parse("users.sqlite/members/status!=active")
         expectEqual(bFilter.dataSetPath, "users.sqlite")
@@ -419,7 +458,7 @@ func runAllTests() async {
         )
 
         let canonical = BanquetSerializer.canonicalString(for: b)
-        expectTrue(canonical.contains("history.db/orders/-total,id,total[50:75]"))
+        expectTrue(canonical.contains("history.db/orders/id,-total[50:75]"))
         expectTrue(canonical.contains("where=status%20=%20'active'") || canonical.contains("where=status = 'active'"))
 
         // Breadcrumb segments
@@ -468,8 +507,8 @@ func runAllTests() async {
             // --- 3. Sorting ---
             (url: "data.sqlite;users;+name", expected: "SELECT * FROM \"users\" ORDER BY \"name\" ASC"),
             (url: "data.sqlite;users;-created_at", expected: "SELECT * FROM \"users\" ORDER BY \"created_at\" DESC"),
-            (url: "data.sqlite;users;id,+name", expected: "SELECT \"id\" FROM \"users\" ORDER BY \"name\" ASC"),
-            (url: "data.sqlite;users;id,-age,email", expected: "SELECT \"id\", \"email\" FROM \"users\" ORDER BY \"age\" DESC"),
+            (url: "data.sqlite;users;id,+name", expected: "SELECT \"id\", \"name\" FROM \"users\" ORDER BY \"name\" ASC"),
+            (url: "data.sqlite;users;id,-age,email", expected: "SELECT \"id\", \"age\", \"email\" FROM \"users\" ORDER BY \"age\" DESC"),
 
             // --- 4. Slice Notation (Limit/Offset) ---
             (url: "data.sqlite;users[0:10]", expected: "SELECT * FROM \"users\" LIMIT 10 OFFSET 0"),
@@ -487,8 +526,8 @@ func runAllTests() async {
             (url: "data.sqlite;users?groupby=country&having=count(*)>5", expected: "SELECT * FROM \"users\" GROUP BY \"country\" HAVING count(*)>5"),
 
             // --- 7. Complex Combinations ---
-            (url: "data.sqlite;users;id,name,-age?where=active=1&limit=5", expected: "SELECT \"id\", \"name\" FROM \"users\" WHERE active=1 ORDER BY \"age\" DESC LIMIT 5"),
-            (url: "data.sqlite;users;id,email,+joined[10:20]", expected: "SELECT \"id\", \"email\" FROM \"users\" ORDER BY \"joined\" ASC LIMIT 10 OFFSET 10"),
+            (url: "data.sqlite;users;id,name,-age?where=active=1&limit=5", expected: "SELECT \"id\", \"name\", \"age\" FROM \"users\" WHERE active=1 ORDER BY \"age\" DESC LIMIT 5"),
+            (url: "data.sqlite;users;id,email,+joined[10:20]", expected: "SELECT \"id\", \"email\", \"joined\" FROM \"users\" ORDER BY \"joined\" ASC LIMIT 10 OFFSET 10"),
             (url: "data.sqlite;users;name!=O%27Reilly", expected: "SELECT * FROM \"users\" WHERE name != 'O''Reilly'"),
 
             // --- 8. Heuristic Path Parsing (No Semicolons) ---

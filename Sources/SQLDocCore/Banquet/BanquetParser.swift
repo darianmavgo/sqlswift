@@ -186,7 +186,9 @@ public enum BanquetParser {
         }
 
         // Conditions & WHERE
-        let queryWhere = parseWhere(rawQuery)
+        // Anything after `?` that isn't a reserved key is a WHERE condition.
+        let bareWhere = parseBareConditions(rawQuery)
+        let queryWhere = [parseWhere(rawQuery), bareWhere].filter { !$0.isEmpty }.joined(separator: " AND ")
         let pathWhere = parsePathConditions(columnPath)
         var whereClause: String? = nil
         if !pathWhere.isEmpty && !queryWhere.isEmpty {
@@ -212,7 +214,9 @@ public enum BanquetParser {
         // GroupBy & Having
         let groupBy = parseGroupBy(path: path, query: rawQuery)
         let having = parseHaving(rawQuery)
-        let extraQueryParams = parseExtraQueryParams(rawQuery)
+        // Collections keep every unrecognised param (catalog search etc.); for tables
+        // only operator-less ones remain — the rest became WHERE conditions above.
+        let extraQueryParams = isCollection ? parseExtraQueryParams(rawQuery) : parseExtraQueryParams(rawQuery).filter { !isCondition($0) }
 
         return Banquet(
             scheme: scheme,
@@ -336,11 +340,30 @@ public enum BanquetParser {
         return first
     }
 
+    /// `id>6000`, `+id>=6000`, `-age<30` → (column, operator, value). The column is
+    /// a plain identifier; any sort marker is dropped. `=` / `!=` are handled by
+    /// the equality rules, so only ordering comparisons are matched here.
+    private static func splitComparison(_ token: String) -> (column: String, op: String, value: String)? {
+        var t = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.hasPrefix("+") || t.hasPrefix("-") { t.removeFirst() }
+        guard let opIdx = t.firstIndex(where: { $0 == "<" || $0 == ">" }) else { return nil }
+        let column = String(t[..<opIdx]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !column.isEmpty,
+              column.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else { return nil }
+        var rest = t[opIdx...]
+        var op = String(rest.removeFirst())
+        if rest.first == "=" { op.append("="); rest.removeFirst() }
+        let value = String(rest).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        return (column, op, value)
+    }
+
     private static func parseSelect(_ columnPath: String) -> [String] {
         let segments = getSegments(columnPath)
         guard !segments.isEmpty else { return ["*"] }
 
         var collected: [String] = []
+        var markedSort: [(Int, String)] = []
         for segment in segments {
             guard !segment.isEmpty else { continue }
             let cols = splitTopLevelCommas(segment)
@@ -351,12 +374,28 @@ public enum BanquetParser {
                 }
                 guard !col.isEmpty else { continue }
                 if col.contains("!=") || col.contains("=") { continue }
-                if col.hasPrefix("+") || col.hasPrefix("-") { continue }
+                if let cmp = splitComparison(col) {
+                    // `id>6000` filters; `+id>6000` also sorts and shows `id`.
+                    if col.hasPrefix("+") || col.hasPrefix("-") { markedSort.append((collected.count, cmp.column)) }
+                    continue
+                }
+                if col.hasPrefix("+") || col.hasPrefix("-") {
+                    // A sort marker also names a shown column — but only alongside
+                    // other columns; on its own (`-Open`) it is sort-only → `*`.
+                    let name = String(col.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !name.isEmpty { markedSort.append((collected.count, name)) }
+                    continue
+                }
                 collected.append(col)
             }
         }
 
-        return collected.isEmpty ? ["*"] : collected
+        guard !collected.isEmpty else { return ["*"] }
+        // Re-insert marked columns at their written position among the plain ones.
+        for (idx, (pos, name)) in markedSort.enumerated() {
+            collected.insert(name, at: min(pos + idx, collected.count))
+        }
+        return collected
     }
 
     private static func parsePathConditions(_ columnPath: String) -> String {
@@ -368,7 +407,17 @@ public enum BanquetParser {
             guard !segment.isEmpty else { continue }
             let parts = splitTopLevelCommas(segment)
             for part in parts {
-                if part.contains("!=") {
+                if let cmp = splitComparison(part) {
+                    var val = cmp.value
+                    if let decoded = val.removingPercentEncoding { val = decoded }
+                    if (val.hasPrefix("'") && val.hasSuffix("'")) || (val.hasPrefix("\"") && val.hasSuffix("\"")), val.count >= 2 {
+                        val = String(val.dropFirst().dropLast())
+                    }
+                    if Double(val) == nil {
+                        val = "'\(val.replacingOccurrences(of: "'", with: "''"))'"
+                    }
+                    conditions.append("\(cmp.column) \(cmp.op) \(val)")
+                } else if part.contains("!=") {
                     let kv = part.components(separatedBy: "!=")
                     if kv.count == 2 {
                         let col = kv[0].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -434,11 +483,9 @@ public enum BanquetParser {
                 if let bracketIdx = col.firstIndex(of: "[") {
                     col = String(col[..<bracketIdx])
                 }
-                if col.hasPrefix("+") {
-                    return (String(col.dropFirst()), "ASC")
-                }
-                if col.hasPrefix("-") {
-                    return (String(col.dropFirst()), "DESC")
+                if col.hasPrefix("+") || col.hasPrefix("-") {
+                    let name = splitComparison(col)?.column ?? String(col.dropFirst())
+                    return (name, col.hasPrefix("+") ? "ASC" : "DESC")
                 }
             }
         }
@@ -519,6 +566,27 @@ public enum BanquetParser {
     private static let standardQueryParamKeys: Set<String> = [
         "where", "filter", "limit", "offset", "sort", "orderby", "order", "groupby", "having"
     ]
+
+    /// A non-reserved `?` param is a condition only if it has a comparison operator.
+    private static func isCondition(_ param: String) -> Bool {
+        let p = (param.removingPercentEncoding ?? param).lowercased()
+        return p.contains("=") || p.contains("<") || p.contains(">")
+            || p.contains(" like ") || p.contains(" in ") || p.contains(" is ") || p.contains(" between ")
+    }
+
+    /// Non-reserved `?` params as SQL conditions, ANDed. `a=b` / `a!=b` get the same
+    /// value quoting as path conditions; anything else (`id>6000`) passes through.
+    private static func parseBareConditions(_ query: String) -> String {
+        parseExtraQueryParams(query).filter(isCondition).compactMap { param -> String? in
+            let decoded = param.removingPercentEncoding ?? param
+            let isEquality = decoded.contains("!=") || (decoded.contains("=") && !decoded.contains(">=") && !decoded.contains("<="))
+            if isEquality {
+                let c = parsePathConditions(decoded)
+                return c.isEmpty ? nil : c
+            }
+            return decoded
+        }.joined(separator: " AND ")
+    }
 
     private static func parseExtraQueryParams(_ query: String) -> [String] {
         guard !query.isEmpty else { return [] }

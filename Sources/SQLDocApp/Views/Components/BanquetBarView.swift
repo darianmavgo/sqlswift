@@ -218,9 +218,11 @@ private struct BanquetAddressField: View {
         }
         .onChange(of: appVM.banquetBarInjectedText) { _, injected in
             guard let injected else { return }
+            // Focus first, text on the next turn: a real keystroke always arrives
+            // in an already-focused field, and live-apply requires focus.
             isFocused = true
-            text = injected
             appVM.banquetBarInjectedText = nil
+            DispatchQueue.main.async { text = injected }
         }
         .onChange(of: appVM.banquetBarPendingPaste) { _, pending in
             guard let pending, !pending.isEmpty else { return }
@@ -233,7 +235,9 @@ private struct BanquetAddressField: View {
     /// unrelated publishes (row counts, timings) never clobber what's being typed.
     private func syncFromGrid(_ new: String) {
         guard new != lastSynced else { return }
-        let wasDirty = isFocused && text != lastSynced
+        // "Dirty" = text differs from the last grid URL. Blur resets it, so this only
+        // happens mid-edit — and doesn't depend on window focus (which needn't be key).
+        let wasDirty = text != lastSynced
         lastSynced = new
         // Don't rewrite text the user is in the middle of typing; the blur handler
         // restores the canonical form.
@@ -248,7 +252,7 @@ private struct BanquetAddressField: View {
     /// reference columns that don't exist yet waits for Return.
     private func scheduleLiveApply(_ value: String) {
         liveApplyTask?.cancel()
-        guard isFocused, value != lastSynced else { return }
+        guard value != lastSynced else { return }
         liveApplyTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }

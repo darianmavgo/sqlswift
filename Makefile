@@ -10,7 +10,7 @@ export SWIFTPM_MODULECACHE_OVERRIDE ?= /tmp/swiftpm-cache
 SWIFT ?= /usr/bin/swift
 SWIFT_FLAGS ?= --disable-sandbox
 
-.PHONY: all build release test clean install install-cli install-app uninstall app bench config generate icons config-check buildinfo lsclean lslist uilog uistate
+.PHONY: all build release test clean install install-cli install-app uninstall app bench config generate icons config-check buildinfo lsclean lslist uilog uistate ui-test ui-e2e
 
 LSREGISTER = /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 BUNDLE_ID  = com.mavgo.sqlswift
@@ -148,6 +148,15 @@ uilog:
 
 uistate:
 	@cat bin/ui-state.json
+
+# Banquet URL <-> grid tests. Both read Tests/SQLDocAppTests/banquet-ui-cases.json.
+#   ui-test: headless Swift Testing over the app's view models (no window needed)
+#   ui-e2e:  replays the same cases in the running dev app (`make hot` first)
+ui-test:
+	swift test
+
+ui-e2e:
+	python3 scripts/ui-e2e.py $(ARGS)
 
 clean:
 	@rm -rf .build bin testdata/*.db
