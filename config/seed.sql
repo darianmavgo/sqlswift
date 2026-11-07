@@ -126,6 +126,9 @@ INSERT INTO setting(key,value,value_type,unit,min_value,max_value,platform,descr
   ('open.deadline_ms',             '60000','int','ms','1000',NULL,'all','How long the window waits on a slow open before giving up',       441),
   ('recents.max_stored',              '20','int','','0','500','all','Recent documents retained',                                         442),
   ('recents.max_shown',                '8','int','','0','50','all','Recent documents listed on the start page',                          443),
+  ('omnibox.history_max',           '200','int','','0','5000','all','Banquet bar URLs remembered for suggestions',                       445),
+  ('omnibox.suggestions_max',         '8','int','','1','30','all','Rows shown in the Banquet bar suggestion dropdown',                 446),
+  ('omnibox.nav_stack_max',          '100','int','','1','1000','all','Back/forward entries kept per session',                         447),
   ('text.cell_display_max_chars',    '400','int','chars','40','10000','all','Cell text truncated for display beyond this length',          444),
   -- server (web only)
   ('server.port_default',              '0','int','','0','65535','web','TCP port; 0 picks a free one',                                     460),
@@ -175,6 +178,8 @@ INSERT INTO keybinding(action,chord,context,label,platform) VALUES
   ('find-next-doc',    'mod+g',        'table', 'Next match (bar closed)',    'all'),
   ('find-prev-doc',    'mod+shift+g',  'table', 'Previous match (bar closed)','all'),
   ('find-close',       'escape',       'find',  'Close the find bar',         'all'),
+  ('nav-back',        'mod+[',        'global','Back to the previous Banquet URL',    'mac'),
+  ('nav-forward',     'mod+]',        'global','Forward to the next Banquet URL',     'mac'),
   ('gallery-toggle',   'mod+alt+g',    'global','Toggle the gallery view',    'all'),
   ('zoom-in',          'mod+plus',     'table', 'Zoom in',                    'all'),
   ('zoom-out',         'mod+minus',    'table', 'Zoom out',                   'all'),

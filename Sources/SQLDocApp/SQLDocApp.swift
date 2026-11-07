@@ -117,6 +117,14 @@ struct SqlSwiftApp: App {
                 }
                 .keyboardShortcut("l", modifiers: .command)
 
+                Button("Back") { appVM.navigateBack() }
+                    .keyboardShortcut("[", modifiers: .command)
+                    .disabled(!appVM.canNavigateBack)
+
+                Button("Forward") { appVM.navigateForward() }
+                    .keyboardShortcut("]", modifiers: .command)
+                    .disabled(!appVM.canNavigateForward)
+
                 Button("Find in Table…") {
                     appVM.isFindBarVisible.toggle()
                 }

@@ -39,6 +39,7 @@ public struct MainView: View {
                 .padding(.bottom, 6)
                 .background(Color(NSColor.windowBackgroundColor))
                 .overlay(Divider(), alignment: .bottom)
+                .zIndex(10) // the suggestion dropdown hangs below the bar, over the content
 
             HStack(spacing: 0) {
                 if appVM.showSidebar, appVM.activeDocEntry != nil {

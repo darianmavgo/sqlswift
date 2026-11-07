@@ -22,6 +22,8 @@ public let sqldocKeybindings: [SQLDocKeybinding] = [
     SQLDocKeybinding(action: "find-prev", chord: "shift+enter", context: "find", label: "Previous match"),
     SQLDocKeybinding(action: "find-prev-doc", chord: "mod+shift+g", context: "table", label: "Previous match (bar closed)"),
     SQLDocKeybinding(action: "gallery-toggle", chord: "mod+alt+g", context: "global", label: "Toggle the gallery view"),
+    SQLDocKeybinding(action: "nav-back", chord: "mod+[", context: "global", label: "Back to the previous Banquet URL"),
+    SQLDocKeybinding(action: "nav-forward", chord: "mod+]", context: "global", label: "Forward to the next Banquet URL"),
     SQLDocKeybinding(action: "open-database", chord: "mod+o", context: "global", label: "Open a database"),
     SQLDocKeybinding(action: "page-down", chord: "pagedown", context: "table", label: "Move down one screen"),
     SQLDocKeybinding(action: "page-up", chord: "pageup", context: "table", label: "Move up one screen"),

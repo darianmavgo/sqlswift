@@ -814,6 +814,91 @@ func runAllTests() async {
         expectEqual(b3.table, "tables")
     }
 
+    // Omnibox-style suggestions, history, back/forward
+    await test("BanquetSuggester: ranking, tables, columns, dedupe") {
+        let ctx = BanquetSuggestContext(
+            history: ["/d/sales.db/orders[0:100]", "/d/sales.db/customers[0:100]"],
+            recents: [.init(path: "/d/markov.db", name: "markov.db")],
+            openDocs: [.init(path: "/d/sales.db", name: "sales.db")],
+            activeDocPath: "/d/sales.db", tables: ["orders", "customers", "order_items"],
+            activeTable: "orders", columns: ["id", "name", "amount"])
+        // prefix beats substring; tables come before history at equal score
+        let s = BanquetSuggester.suggestions(for: "ord", context: ctx)
+        expectEqual(s.first?.kind, .table)
+        expectEqual(s.first?.completion, "/d/sales.db/orders")
+        expectTrue(s.contains { $0.display == "order_items" })
+        // no row repeats a completion
+        expectEqual(Set(s.map(\.completion)).count, s.count)
+        // column completion on the last segment, sort marker kept
+        let c = BanquetSuggester.suggestions(for: "/d/sales.db/orders/-am", context: ctx)
+        expectEqual(c.first?.completion, "/d/sales.db/orders/-amount")
+        expectEqual(c.first?.kind, .column)
+        // an exact column is not re-suggested; columns need the table in the path
+        expectTrue(BanquetSuggester.suggestions(for: "/d/sales.db/orders/amount", context: ctx).allSatisfy { $0.kind != .column })
+        expectTrue(BanquetSuggester.suggestions(for: "/d/other.db/x/am", context: ctx).allSatisfy { $0.kind != .column })
+        // history rows are removable, others are not
+        let h = BanquetSuggester.suggestions(for: "custom", context: ctx)
+        expectTrue(h.contains { $0.kind == .history && $0.removable })
+        expectTrue(h.allSatisfy { $0.kind == .history || !$0.removable })
+        // limit and empty input
+        expectEqual(BanquetSuggester.suggestions(for: "o", context: ctx, limit: 1).count, 1)
+        expectTrue(BanquetSuggester.suggestions(for: "zzz-nothing", context: ctx).isEmpty)
+        expectEqual(BanquetSuggester.suggestions(for: "", context: ctx).first?.kind, .history)
+    }
+
+    await test("BanquetSuggester: @keywords") {
+        let ctx = BanquetSuggestContext(
+            history: ["/d/a.db/t1", "/d/b.db/t2"],
+            recents: [.init(path: "/d/markov.db", name: "markov.db")],
+            openDocs: [.init(path: "/d/a.db", name: "a.db")],
+            activeDocPath: "/d/a.db", tables: ["t1", "events"], activeTable: "t1", columns: [])
+        let kw = BanquetSuggester.suggestions(for: "@ta", context: ctx)
+        expectEqual(kw.map(\.display), ["@tables"])
+        expectEqual(kw.first?.completion, "@tables ")
+        expectEqual(BanquetSuggester.suggestions(for: "@", context: ctx).count, BanquetSuggester.keywords.count)
+        expectEqual(BanquetSuggester.suggestions(for: "@tables ev", context: ctx).map(\.completion), ["/d/a.db/events"])
+        expectEqual(BanquetSuggester.suggestions(for: "@tables ", context: ctx).count, 2)
+        expectEqual(BanquetSuggester.suggestions(for: "@recent mark", context: ctx).map(\.display), ["markov.db"])
+        expectEqual(BanquetSuggester.suggestions(for: "@open", context: ctx).first?.kind, .keyword)
+        expectEqual(BanquetSuggester.suggestions(for: "@open ", context: ctx).map(\.display), ["a.db"])
+        expectEqual(BanquetSuggester.suggestions(for: "@history b.db", context: ctx).map(\.completion), ["/d/b.db/t2"])
+        // unknown keyword with a space matches nothing rather than falling through to plain text
+        expectTrue(BanquetSuggester.suggestions(for: "@nope x", context: ctx).isEmpty)
+    }
+
+    await test("BanquetHistory: record, dedupe, cap, remove, persistence") {
+        let suite = "sqldoc.test.\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: suite)!
+        defer { d.removePersistentDomain(forName: suite) }
+        let h = BanquetHistory(storageKey: "k", defaults: d, maxEntries: 3)
+        h.record("a"); h.record("b"); h.record("c"); h.record("a")
+        expectEqual(h.entries, ["a", "c", "b"])
+        h.record("d")
+        expectEqual(h.entries, ["d", "a", "c"])      // oldest dropped at the cap
+        h.record("   "); h.record("")
+        expectEqual(h.entries.count, 3)              // blanks ignored
+        h.remove("a")
+        expectEqual(h.entries, ["d", "c"])
+        expectEqual(BanquetHistory(storageKey: "k", defaults: d, maxEntries: 3).entries, ["d", "c"])
+    }
+
+    await test("BanquetNavStack: back/forward, truncation, cap") {
+        var n = BanquetNavStack(maxEntries: 3)
+        expectTrue(!n.canGoBack && !n.canGoForward)
+        n.visit("a"); n.visit("b"); n.visit("b")    // same URL twice is one entry
+        expectEqual(n.entries, ["a", "b"])
+        expectEqual(n.back(), "a")
+        expectEqual(n.back(), nil)
+        expectEqual(n.forward(), "b")
+        _ = n.back()
+        n.visit("c")                                  // new visit drops "b"
+        expectEqual(n.entries, ["a", "c"])
+        expectTrue(!n.canGoForward)
+        n.visit("d"); n.visit("e")                    // cap of 3 drops the oldest
+        expectEqual(n.entries, ["c", "d", "e"])
+        expectEqual(n.current, "e")
+    }
+
     print("\n-------------------------------------------------------")
     print("Results: \(passed) passed, \(failed) failed")
     print("-------------------------------------------------------\n")

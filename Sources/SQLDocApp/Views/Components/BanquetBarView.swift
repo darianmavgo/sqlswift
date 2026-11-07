@@ -166,6 +166,15 @@ private struct BanquetAddressField: View {
     @State private var text: String = ""
     @State private var lastSynced: String = ""
     @State private var liveApplyTask: Task<Void, Never>?
+    @State private var suggestions: [BanquetSuggestion] = []
+    /// Row under the keyboard cursor. Moving it never touches `text`, so browsing the
+    /// dropdown can't trigger live-apply.
+    @State private var highlighted: Int?
+    @State private var dropdownOpen = false
+    /// Bar-originated parse/open failure, shown under the field instead of a modal alert.
+    @State private var inlineError: String?
+    /// The text `inlineError` was raised for; editing to anything else clears it.
+    @State private var errorForText: String?
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -179,8 +188,12 @@ private struct BanquetAddressField: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 11.5, weight: .medium, design: .monospaced))
                 .focused($isFocused)
-                .onSubmit { submit() }
-                .onExitCommand { revert() }
+                .onSubmit { returnPressed() }
+                .onExitCommand { escapePressed() }
+                .onKeyPress(.downArrow) { moveHighlight(1) }
+                .onKeyPress(.upArrow) { moveHighlight(-1) }
+                .onKeyPress(.tab) { tabPressed() }
+                .onKeyPress(keys: [.deleteForward, .delete]) { removePressed($0) }
                 .frame(maxWidth: .infinity)
 
             if let tableVM {
@@ -198,18 +211,24 @@ private struct BanquetAddressField: View {
         .overlay(
             RoundedRectangle(cornerRadius: 6)
                 .stroke(
-                    isFocused ? Color.accentColor : Color(NSColor.separatorColor).opacity(0.7),
-                    lineWidth: isFocused ? 1.5 : 1.0
+                    inlineError != nil ? Color.red
+                        : isFocused ? Color.accentColor : Color(NSColor.separatorColor).opacity(0.7),
+                    lineWidth: isFocused || inlineError != nil ? 1.5 : 1.0
                 )
         )
+        .overlay(alignment: .topLeading) { floatingPanel.offset(y: 32) }
+        .zIndex(1)
         .onChange(of: url, initial: true) { _, new in syncFromGrid(new) }
         .onChange(of: text, initial: true) { _, newValue in
             appVM.banquetBarText = newValue
             flattenNewlines(newValue)
             scheduleLiveApply(newValue)
+            if newValue != errorForText { inlineError = nil }
+            refreshSuggestions()
         }
         .onChange(of: isFocused) { _, focused in
             if appVM.isBanquetBarEditing != focused { appVM.isBanquetBarEditing = focused }
+            if !focused { closeDropdown(); inlineError = nil }
             // Leaving the field: whatever wasn't applied is dropped; the bar shows the grid.
             if !focused, text != lastSynced { text = lastSynced }
         }
@@ -299,9 +318,8 @@ private struct BanquetAddressField: View {
         isFocused = true
     }
 
-    private func submit() {
-        isFocused = false
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func submit(_ override: String? = nil) {
+        let trimmed = (override ?? text).trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = trimmed.lowercased()
         let isStandaloneSQL = lower.hasPrefix("select ") || lower.hasPrefix("with ") || lower.hasPrefix("pragma ") || lower.hasPrefix("explain ")
         let resolvedURL: String
@@ -315,10 +333,186 @@ private struct BanquetAddressField: View {
             resolvedURL = trimmed
         }
         UILog.event("bar", "submit", ["text": trimmed])
+        let before = lastSynced
+        let priorError = appVM.errorMessage
         appVM.openBanquet(urlString: resolvedURL, activeTableVM: tableVM)
+
+        // A failure of *this* submit stays in the bar (red border + message) so the text
+        // can be fixed; the modal alert is for errors that didn't come from typing here.
+        if let e = appVM.errorMessage, e != priorError {
+            appVM.errorMessage = priorError
+            inlineError = e
+            errorForText = override ?? text
+            closeDropdown()
+            return
+        }
+        isFocused = false
+        closeDropdown()
         let fresh = appVM.banquetURLString(for: tableVM)
         lastSynced = fresh
         text = fresh
+        appVM.noteBanquetNavigation(from: before, to: fresh)
+        // A file that opens asynchronously only reaches its final URL a moment later.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            let settled = appVM.banquetURLString(for: tableVM)
+            if settled != fresh, !isFocused { appVM.noteBanquetNavigation(from: fresh, to: settled) }
+        }
+    }
+
+    // MARK: - Omnibox keys & dropdown
+
+    /// Return: accept the highlighted row if there is one, else submit the text.
+    private func returnPressed() {
+        guard dropdownOpen, let h = highlighted, suggestions.indices.contains(h) else {
+            submit()
+            return
+        }
+        accept(suggestions[h], thenSubmit: true)
+    }
+
+    /// Tab: fill the highlighted row (or the first) without submitting.
+    private func tabPressed() -> KeyPress.Result {
+        guard dropdownOpen, !suggestions.isEmpty else { return .ignored }
+        accept(suggestions[highlighted ?? 0], thenSubmit: false)
+        return .handled
+    }
+
+    /// Esc closes the dropdown first; with nothing open it reverts the edit.
+    private func escapePressed() {
+        if dropdownOpen || inlineError != nil {
+            closeDropdown()
+            inlineError = nil
+        } else {
+            revert()
+        }
+    }
+
+    /// ↓ opens the dropdown on a quiet bar (what you used last), then moves; ↑ walks back
+    /// up and off the top row.
+    private func moveHighlight(_ delta: Int) -> KeyPress.Result {
+        if !dropdownOpen {
+            guard delta > 0 else { return .ignored }
+            refreshSuggestions(force: true)
+            return dropdownOpen ? .handled : .ignored
+        }
+        if delta > 0 {
+            highlighted = min((highlighted ?? -1) + 1, suggestions.count - 1)
+        } else if let h = highlighted {
+            highlighted = h == 0 ? nil : h - 1
+        }
+        return .handled
+    }
+
+    /// Shift+fn+Delete (forward delete) forgets a highlighted history row, like Chrome.
+    private func removePressed(_ press: KeyPress) -> KeyPress.Result {
+        guard press.modifiers.contains(.shift), dropdownOpen,
+              let h = highlighted, suggestions.indices.contains(h), suggestions[h].removable
+        else { return .ignored }
+        appVM.banquetHistory.remove(suggestions[h].completion)
+        refreshSuggestions(force: true, keepIndex: h)
+        return .handled
+    }
+
+    private func accept(_ row: BanquetSuggestion, thenSubmit: Bool) {
+        // Keywords and trailing-space completions are only the start of a query.
+        if thenSubmit, row.kind != .keyword, !row.completion.hasSuffix(" ") {
+            closeDropdown()
+            text = row.completion
+            submit(row.completion)
+        } else {
+            text = row.completion
+            highlighted = nil
+        }
+    }
+
+    private func closeDropdown() {
+        dropdownOpen = false
+        highlighted = nil
+        suggestions = []
+        appVM.setSuggestionsSnapshot([])
+    }
+
+    /// Suggestions are for text the user has changed; an untouched bar shows none until ↓.
+    private func refreshSuggestions(force: Bool = false, keepIndex: Int? = nil) {
+        guard isFocused, force || text != lastSynced else {
+            if dropdownOpen { closeDropdown() }
+            return
+        }
+        let query = (force && text == lastSynced) ? "" : text
+        let rows = BanquetSuggester.suggestions(for: query, context: appVM.banquetSuggestContext(tableVM: tableVM))
+        suggestions = rows
+        dropdownOpen = !rows.isEmpty
+        highlighted = keepIndex.flatMap { rows.isEmpty ? nil : min($0, rows.count - 1) }
+        appVM.setSuggestionsSnapshot(rows.map(\.completion))
+    }
+
+    @ViewBuilder
+    private var floatingPanel: some View {
+        if let inlineError {
+            Text(inlineError)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.red)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.windowBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.red.opacity(0.6), lineWidth: 1))
+                .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+        } else if dropdownOpen, !suggestions.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(suggestions.enumerated()), id: \.element.id) { i, row in
+                    suggestionRow(row, selected: i == highlighted)
+                        .contentShape(Rectangle())
+                        .onTapGesture { accept(row, thenSubmit: true) }
+                }
+            }
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color(NSColor.windowBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor), lineWidth: 1))
+            .shadow(color: .black.opacity(0.22), radius: 10, y: 4)
+        }
+    }
+
+    private func suggestionRow(_ row: BanquetSuggestion, selected: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon(for: row.kind))
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(selected ? .white : .secondary)
+                .frame(width: 14)
+            Text(row.display)
+                .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                .foregroundColor(selected ? .white : .primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if !row.detail.isEmpty {
+                Text(row.detail)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(selected ? .white.opacity(0.8) : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+            Spacer(minLength: 0)
+            if selected, row.removable {
+                Text("⇧⌦ remove")
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundColor(.white.opacity(0.8))
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 24)
+        .background(selected ? Color.accentColor : Color.clear)
+    }
+
+    private func icon(for kind: BanquetSuggestion.Kind) -> String {
+        switch kind {
+        case .keyword: return "at"
+        case .table: return "tablecells"
+        case .column: return "text.alignleft"
+        case .openDoc: return "doc"
+        case .recent: return "clock"
+        case .history: return "arrow.counterclockwise.circle"
+        }
     }
 
     private func revert() {

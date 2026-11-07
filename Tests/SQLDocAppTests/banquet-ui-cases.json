@@ -53,5 +53,28 @@
       "expect": { "bar": "{DB}/telemetry[0:100]" } },
     { "name": "bar: typed bare ?col>value applies and normalizes on blur", "ui": true, "steps": ["url {DB}/telemetry", "type {DB}/telemetry[0:100]?id>6000", "blur"],
       "expect": { "bar": "{DB}/telemetry[0:100]?where=id > 6000", "filters": 1 } }
+    ,
+    { "name": "omnibox: plain text suggests matching table first", "steps": ["url {DB}/telemetry", "suggest tele"],
+      "expect": { "suggestions": ["{DB}/telemetry"], "url": "{DB}/telemetry[0:100]" } },
+    { "name": "omnibox: column completion keeps the sort marker", "steps": ["url {DB}/telemetry", "suggest {DB}/telemetry/-temp"],
+      "expect": { "suggestions": ["{DB}/telemetry/-temperature"] } },
+    { "name": "omnibox: @tables lists tables of the open doc", "steps": ["url {DB}/telemetry", "suggest @tables tele"],
+      "expect": { "suggestions": ["{DB}/telemetry"] } },
+    { "name": "omnibox: @ alone offers the keywords", "steps": ["url {DB}/telemetry", "suggest @"],
+      "expect": { "suggestions": ["@tables ", "@open ", "@recent ", "@history "] } },
+    { "name": "omnibox: browsing suggestions never changes the grid", "steps": ["url {DB}/telemetry/-id", "suggest tele", "suggest @tables tele"],
+      "expect": { "url": "{DB}/telemetry/-id[0:100]", "sort": "id desc" } },
+    { "name": "nav: back and forward restore URLs", "steps": ["url {DB}/telemetry", "go {DB}/telemetry/-id", "go {DB}/telemetry/+temperature[200:250]", "back"],
+      "expect": { "url": "{DB}/telemetry/-id[0:100]", "sort": "id desc", "navBack": true, "navForward": true } },
+    { "name": "nav: back to the start disables Back", "steps": ["url {DB}/telemetry", "go {DB}/telemetry/-id", "back"],
+      "expect": { "url": "{DB}/telemetry[0:100]", "navBack": false, "navForward": true } },
+    { "name": "nav: a new visit after back drops forward history", "steps": ["url {DB}/telemetry", "go {DB}/telemetry/-id", "back", "go {DB}/telemetry/+temperature"],
+      "expect": { "sort": "temperature asc", "navBack": true, "navForward": false } },
+    { "name": "nav: forward re-applies", "steps": ["url {DB}/telemetry", "go {DB}/telemetry/-id", "back", "forward"],
+      "expect": { "url": "{DB}/telemetry/-id[0:100]", "navForward": false } },
+    { "name": "omnibox: typing @tables in the real field opens the dropdown", "ui": true, "steps": ["url {DB}/telemetry", "type @tables tele"],
+      "expect": { "bar": "@tables tele", "suggestions": ["{DB}/telemetry"], "url": "{DB}/telemetry[0:100]" } },
+    { "name": "omnibox: blur closes the dropdown and reverts", "ui": true, "steps": ["url {DB}/telemetry", "type @tables tele", "blur"],
+      "expect": { "bar": "{DB}/telemetry[0:100]", "suggestions": [] } }
   ]
 }

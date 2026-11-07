@@ -62,6 +62,22 @@ final class UICommandRunner {
             appVM.openBanquet(urlString: rest, activeTableVM: vm)
         case "type":
             appVM.banquetBarInjectedText = rest
+        case "suggest":
+            // What the dropdown would offer for `rest`, without needing key events.
+            let ctx = appVM.banquetSuggestContext(tableVM: vm)
+            appVM.setSuggestionsSnapshot(BanquetSuggester.suggestions(for: rest, context: ctx).map(\.completion))
+        case "go":
+            // Same bookkeeping as submitting in the bar: remember where we were and where we went.
+            let before = appVM.banquetURLString(for: vm)
+            appVM.openBanquet(urlString: rest, activeTableVM: vm)
+            appVM.noteBanquetNavigation(from: before, to: appVM.banquetURLString(for: appVM.activeTableVM))
+        case "navreset":
+            appVM.resetNavigation()
+            appVM.setSuggestionsSnapshot([])
+        case "back":
+            appVM.navigateBack()
+        case "forward":
+            appVM.navigateForward()
         case "blur":
             appVM.isBanquetBarEditing = false
         case "table":

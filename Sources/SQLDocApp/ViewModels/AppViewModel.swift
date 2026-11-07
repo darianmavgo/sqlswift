@@ -155,6 +155,8 @@ public final class AppViewModel: ObservableObject {
             "banquetBarEditing": isBanquetBarEditing,
             "banquetURL": banquetURLString(for: activeTableVM),
             "banquetBarText": banquetBarText,
+            "suggestions": banquetSuggestionsSnapshot,
+            "nav": ["back": canNavigateBack, "forward": canNavigateForward, "current": navStack.current ?? ""] as [String: Any],
             "folder": [
                 "path": currentFolderPath,
                 "subfolder": selectedSubfolder ?? "",
@@ -215,6 +217,7 @@ public final class AppViewModel: ObservableObject {
 
     public let session = SessionManager.shared
     public let recents = RecentsManager.shared
+    public let banquetHistory = BanquetHistory.shared
     public let persistence = StatePersistenceManager.shared
 
     private var isRestoringSession = false
@@ -771,6 +774,71 @@ public final class AppViewModel: ObservableObject {
                 self?.banquetCopiedFeedback = false
             }
         }
+    }
+
+    // MARK: - Omnibox: suggestions, history, back/forward
+
+    /// Completions currently offered by the bar's dropdown (written by the bar, read by
+    /// `uiStateSnapshot` so ui-e2e can assert them). Not @Published: it changes per keystroke.
+    public private(set) var banquetSuggestionsSnapshot: [String] = []
+
+    public func setSuggestionsSnapshot(_ completions: [String]) {
+        guard completions != banquetSuggestionsSnapshot else { return }
+        banquetSuggestionsSnapshot = completions
+        // Only the dev snapshot reads this; skip the re-render cost in normal use.
+        if UILog.isEnabled { objectWillChange.send() }
+    }
+
+    /// Forget back/forward and URL history (ui-e2e starts each case from a clean slate).
+    public func resetNavigation() {
+        navStack = BanquetNavStack()
+        banquetHistory.clear()
+        updateNavFlags()
+    }
+
+    private var navStack = BanquetNavStack()
+    @Published public private(set) var canNavigateBack = false
+    @Published public private(set) var canNavigateForward = false
+
+    /// Everything the suggester may look at, from state that is already loaded.
+    public func banquetSuggestContext(tableVM: TableViewModel?) -> BanquetSuggestContext {
+        func file(_ path: String) -> BanquetSuggestContext.File {
+            .init(path: path, name: (path as NSString).lastPathComponent)
+        }
+        return BanquetSuggestContext(
+            history: banquetHistory.entries,
+            recents: recents.getRecents().map { .init(path: $0.path, name: $0.name) },
+            openDocs: openDocuments.map { file($0.doc.path) },
+            activeDocPath: activeDocEntry?.doc.path,
+            tables: activeDocEntry?.doc.tables.filter { !$0.hidden }.map(\.name) ?? [],
+            activeTable: tableVM?.tableName,
+            columns: tableVM?.rawColumns.map(\.name) ?? [])
+    }
+
+    /// Remembers a submitted URL for suggestions and for ⌘[ / ⌘]. `from` is the URL the
+    /// grid showed before the jump, so the first Back has somewhere to go.
+    public func noteBanquetNavigation(from: String, to: String) {
+        navStack.visit(from)
+        navStack.visit(to)
+        banquetHistory.record(to)
+        updateNavFlags()
+    }
+
+    public func navigateBack() {
+        guard let url = navStack.back() else { return }
+        updateNavFlags()
+        openBanquet(urlString: url, activeTableVM: activeTableVM)
+    }
+
+    public func navigateForward() {
+        guard let url = navStack.forward() else { return }
+        updateNavFlags()
+        openBanquet(urlString: url, activeTableVM: activeTableVM)
+    }
+
+    private func updateNavFlags() {
+        canNavigateBack = navStack.canGoBack
+        canNavigateForward = navStack.canGoForward
     }
 
     /// Navigates to a Banquet URL or local file/folder path: resolves dataset path, folder, table, sort, and filters.

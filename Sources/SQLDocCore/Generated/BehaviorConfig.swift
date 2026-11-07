@@ -46,6 +46,12 @@ public enum BehaviorConfig {
     public static let galleryMinTables: Int = 3
     /// Rows rendered per table inside the gallery  [1..10000 rows]
     public static let galleryRowCap: Int = 200
+    /// Banquet bar URLs remembered for suggestions  [0..5000]
+    public static let omniboxHistoryMax: Int = 200
+    /// Back/forward entries kept per session  [1..1000]
+    public static let omniboxNavStackMax: Int = 100
+    /// Rows shown in the Banquet bar suggestion dropdown  [1..30]
+    public static let omniboxSuggestionsMax: Int = 8
     /// How long the window waits on a slow open before giving up  [1000..… ms]
     public static let openDeadlineMs: Int = 60000
     /// Default for the immutable (skip-locking) open promise

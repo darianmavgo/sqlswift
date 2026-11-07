@@ -19,6 +19,11 @@ struct UICase: Decodable, Sendable, CustomTestStringConvertible {
         var rowsLoaded: Int?
         var visibleColumns: [String]?
         var bar: String?
+        /// Exact completions the dropdown offers, in order (after a `suggest` step or typing).
+        var suggestions: [String]?
+        var navBack: Bool?
+        var navForward: Bool?
+        var navCurrent: String?
     }
     var name: String
     var steps: [String]
@@ -72,6 +77,7 @@ struct BanquetUITests {
     func caseMatchesWindowState(_ c: UICase) async throws {
         let db = fixtureDBPath
         let appVM = AppViewModel()
+        appVM.resetNavigation()   // history is shared storage; every case starts empty
         // MainView calls syncActiveTableVM when the document or table changes; mirror that.
         var lastSelection = ""
         func lifecycle() {
@@ -100,6 +106,11 @@ struct BanquetUITests {
         check(g["pageLimit"] as? Int, e.pageLimit, "page limit")
         check(g["rowsLoaded"] as? Int, e.rowsLoaded, "rows loaded")
         check(g["visibleColumns"] as? [String], e.visibleColumns, "visible columns")
+        let nav = s["nav"] as? [String: Any] ?? [:]
+        check((s["suggestions"] as? [String]).map { $0.map { $0.replacingOccurrences(of: db, with: "{DB}") } }, e.suggestions, "suggestions")
+        check(nav["back"] as? Bool, e.navBack, "can go back")
+        check(nav["forward"] as? Bool, e.navForward, "can go forward")
+        check((nav["current"] as? String).map { $0.replacingOccurrences(of: db, with: "{DB}") }, e.navCurrent, "nav current")
         let queryError: String = appVM.activeTableVM?.queryError ?? ""
         #expect(queryError.isEmpty, "query error: \(queryError)")
 
