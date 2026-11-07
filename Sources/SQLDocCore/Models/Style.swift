@@ -20,11 +20,11 @@ public struct Style: Equatable, Codable, Sendable {
     /// Per-table column order hints from `_style` (`"<table>.columns"` or `"columns"` for all tables).
     public var tableColumns: [String: [String]] = [:]
 
-    public init(title: String? = nil, accent: String = "#2563eb", theme: String = "auto") {
+    public init(title: String? = nil, accent: String = DesignToken.accentHex, theme: String = "auto") {
         self.title = title
         self.accent = accent
         self.theme = theme
     }
 
-    public static let `default` = Style(title: nil, accent: "#2563eb", theme: "auto")
+    public static let `default` = Style(title: nil, accent: DesignToken.accentHex, theme: "auto")
 }

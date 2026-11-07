@@ -82,6 +82,7 @@ INSERT INTO setting(key,value,value_type,unit,min_value,max_value,platform,descr
   ('window.block_rows',              '200','int','rows','20','1000','all','Rows per fetched window during virtualized scroll',            300),
   ('window.max_rows',               '1000','int','rows','100','100000','all','Hard cap on a single rows request',                          301),
   ('window.default_rows',            '100','int','rows','10','1000','all','Rows returned when a request omits a limit',                    302),
+  ('window.all_rows_cap',          '50000','int','rows','1000','5000000','all','Rows loaded when a Banquet URL has no slice ("all rows"); a bigger table shows [0:cap] in the bar', 308),
   ('window.overscan_rows',             '8','int','rows','0','64','web','Rows rendered above/below the viewport',                          303),
   ('window.max_sizer_px',       '15000000','int','px','1000000',NULL,'web','Scroll element height ceiling before native scrolling drifts', 304),
   ('window.block_cache_limit',        '60','int','windows','4','1000','web','Max fetched windows kept in memory',                          305),
@@ -126,6 +127,7 @@ INSERT INTO setting(key,value,value_type,unit,min_value,max_value,platform,descr
   ('open.deadline_ms',             '60000','int','ms','1000',NULL,'all','How long the window waits on a slow open before giving up',       441),
   ('recents.max_stored',              '20','int','','0','500','all','Recent documents retained',                                         442),
   ('recents.max_shown',                '8','int','','0','50','all','Recent documents listed on the start page',                          443),
+  ('ui.theme_default',           'system','enum','',NULL,NULL,'all','Colour scheme on first launch, before a theme is picked in the app (a document _style theme still wins under system)', 448),
   ('omnibox.history_max',           '200','int','','0','5000','all','Banquet bar URLs remembered for suggestions',                       445),
   ('omnibox.suggestions_max',         '8','int','','1','30','all','Rows shown in the Banquet bar suggestion dropdown',                 446),
   ('omnibox.nav_stack_max',          '100','int','','1','1000','all','Back/forward entries kept per session',                         447),
@@ -135,6 +137,9 @@ INSERT INTO setting(key,value,value_type,unit,min_value,max_value,platform,descr
   ('server.open_browser_default',   'true','bool','',NULL,NULL,'web','Launch the browser after starting the server',                    461);
 
 INSERT INTO setting_enum(setting_key,value,label,ordinal) VALUES
+  ('ui.theme_default','system','Follow macOS',0),
+  ('ui.theme_default','light','Light',1),
+  ('ui.theme_default','dark','Dark',2),
   ('zoom.step_mode','multiply','Multiply by step',0),
   ('zoom.step_mode','add','Add step',1);
 
@@ -149,7 +154,12 @@ INSERT INTO override(kind,ref,platform,value,reason) VALUES
   ('setting','zoom.max','mac','2.0',
    'Swift clamps zoom to 2.0. Raise to 3.0 to match web, then delete.'),
   ('token','row-height','mac','26',
-   'Swift grid uses 26px rows. Adopt 28 for parity, then delete.');
+   'Swift grid uses 26px rows. Adopt 28 for parity, then delete.'),
+  -- Not debt: the SqlSwift look (dark + green) taken from testdata/sample.db _style. Web keeps its own.
+  ('token','accent','mac','#0f9d58',
+   'INTENTIONAL: SqlSwift look, green accent as in the sample telemetry document _style. Web stays blue.'),
+  ('setting','ui.theme_default','mac','dark',
+   'INTENTIONAL: SqlSwift opens dark on first launch. A theme picked in the app, including System, always wins.');
 
 -- ---------------------------------------------------------------------------
 -- TYPOGRAPHY ROLES

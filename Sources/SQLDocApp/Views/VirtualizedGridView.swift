@@ -383,6 +383,9 @@ public struct VirtualizedGridView: View {
 
     // MARK: - Keyboard
 
+    /// Rows a Page Up/Down moves when the whole table is one page.
+    private static let allRowsPageStep = 25
+
     private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
         guard let page = tableVM.currentPage, !page.rows.isEmpty else { return .ignored }
         let maxRow = page.rows.count - 1
@@ -407,14 +410,28 @@ public struct VirtualizedGridView: View {
             appVM.selectedCell = (curRow, visible[min(visible.count - 1, curVisPos + 1)])
             return .handled
         case .pageUp:
+            if tableVM.isShowingAllRows {
+                let r = max(0, curRow - Self.allRowsPageStep)
+                appVM.selectedCell = (r, curCol); appVM.selectedRowIndex = r
+                return .handled
+            }
             appVM.paginatePrevious(tableVM: tableVM); return .handled
         case .pageDown:
+            if tableVM.isShowingAllRows {
+                let r = min(maxRow, curRow + Self.allRowsPageStep)
+                appVM.selectedCell = (r, curCol); appVM.selectedRowIndex = r
+                return .handled
+            }
             appVM.paginateNext(tableVM: tableVM); return .handled
         case .home:
             appVM.paginateFirst(tableVM: tableVM)
             appVM.selectedCell = (0, curCol); appVM.selectedRowIndex = 0
             return .handled
         case .end:
+            if tableVM.isShowingAllRows {
+                appVM.selectedCell = (maxRow, curCol); appVM.selectedRowIndex = maxRow
+                return .handled
+            }
             appVM.paginateLast(tableVM: tableVM); return .handled
         case .space, .return:
             if curRow < page.rows.count, curCol < tableVM.columns.count {

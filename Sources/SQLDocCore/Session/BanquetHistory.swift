@@ -89,3 +89,45 @@ public struct BanquetNavStack: Equatable, Sendable {
         return entries[index]
     }
 }
+
+/// ↑/↓ recall of submitted URLs in the bar (banquet-bar-style rule 6). ↑ walks to older
+/// entries, ↓ back toward the newest and then to the unsubmitted draft. Pure value type.
+public struct BanquetRecall: Equatable, Sendable {
+    public private(set) var index: Int?
+    public private(set) var draft = ""
+    /// The text recall last wrote into the bar; seeing it again means "still browsing", not typing.
+    public private(set) var lastWritten: String?
+
+    public init() {}
+
+    public var isRecalling: Bool { index != nil }
+
+    /// The text the bar should now show, or nil when there is nowhere further to go.
+    public mutating func step(older: Bool, current: String, entries: [String]) -> String? {
+        var next = (index ?? -1) + (older ? 1 : -1)
+        if index == nil {
+            if !older { return nil }          // ↓ with nothing recalled is not ours
+            // The newest entry is usually the URL already showing; ↑ should go somewhere new.
+            if entries.indices.contains(next), entries[next] == current { next += 1 }
+        }
+        if next >= entries.count { return nil }
+        if index == nil { draft = current }
+        let value: String
+        if next < 0 {
+            index = nil
+            value = draft
+        } else {
+            index = next
+            value = entries[next]
+        }
+        lastWritten = value
+        return value
+    }
+
+    /// The user typed, blurred, or navigated: forget the walk.
+    public mutating func reset() {
+        index = nil
+        lastWritten = nil
+        draft = ""
+    }
+}

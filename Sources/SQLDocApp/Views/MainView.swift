@@ -59,13 +59,18 @@ public struct MainView: View {
         .onAppear {
             syncActiveTableVM()
             uiCommands.start(appVM: appVM)
+            // banquet-bar-style rule 2: the bar is focused on launch.
+            DispatchQueue.main.async { appVM.isBanquetBarEditing = true }
         }
         // Debounced so a burst of view-model changes writes one snapshot.
         .onReceive(appVM.objectWillChange.debounce(for: .milliseconds(300), scheduler: RunLoop.main)) { _ in
             guard UILog.isEnabled else { return }
             UILog.writeSnapshot(appVM.uiStateSnapshot())
         }
-        .onChange(of: appVM.selectedTableName) { _, _ in syncActiveTableVM() }
+        .onChange(of: appVM.selectedTableName) { _, _ in
+            appVM.isTableListVisible = false   // picking a table in the sidebar leaves the list
+            syncActiveTableVM()
+        }
         .onChange(of: appVM.activeDocEntry?.id) { _, _ in syncActiveTableVM() }
         .sheet(item: $appVM.inspectingCell) { info in
             DataInspectorView(info: info) { appVM.inspectingCell = nil }
@@ -119,6 +124,8 @@ public struct MainView: View {
             ZStack {
                 if appVM.isFolderBrowserVisible || appVM.activeDocEntry == nil {
                     StartPageView(appVM: appVM)
+                } else if appVM.isTableListVisible, let entry = appVM.activeDocEntry {
+                    TableListView(doc: entry.doc)
                 } else if let activeTableVM {
                     VirtualizedGridView(appVM: appVM, tableVM: activeTableVM)
                 } else if appVM.activeDocEntry?.doc.tables.isEmpty == true {

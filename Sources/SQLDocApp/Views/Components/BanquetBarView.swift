@@ -221,6 +221,9 @@ private struct BanquetAddressField: View {
         .onChange(of: url, initial: true) { _, new in syncFromGrid(new) }
         .onChange(of: text, initial: true) { _, newValue in
             appVM.banquetBarText = newValue
+            // Walking history is browsing, not typing: no live-apply, no dropdown.
+            if newValue == appVM.barRecall.lastWritten { return }
+            appVM.barRecall.reset()
             flattenNewlines(newValue)
             scheduleLiveApply(newValue)
             if newValue != errorForText { inlineError = nil }
@@ -228,7 +231,7 @@ private struct BanquetAddressField: View {
         }
         .onChange(of: isFocused) { _, focused in
             if appVM.isBanquetBarEditing != focused { appVM.isBanquetBarEditing = focused }
-            if !focused { closeDropdown(); inlineError = nil }
+            if !focused { closeDropdown(); inlineError = nil; appVM.barRecall.reset() }
             // Leaving the field: whatever wasn't applied is dropped; the bar shows the grid.
             if !focused, text != lastSynced { text = lastSynced }
         }
@@ -295,7 +298,7 @@ private struct BanquetAddressField: View {
         if b.select != ["*"], b.select.contains(where: { !known.contains($0.lowercased()) }) { return }
 
         UILog.event("bar", "live apply", ["text": value])
-        tableVM.applyBanquet(b)
+        tableVM.applyBanquet(b, unsliced: .keep)
     }
 
     private func flattenNewlines(_ value: String) {
@@ -391,6 +394,8 @@ private struct BanquetAddressField: View {
     /// ↓ opens the dropdown on a quiet bar (what you used last), then moves; ↑ walks back
     /// up and off the top row.
     private func moveHighlight(_ delta: Int) -> KeyPress.Result {
+        // No dropdown (a quiet bar) or already walking history: ↑/↓ recall evaluated URLs.
+        if appVM.barRecall.isRecalling || (!dropdownOpen && delta < 0) { return recallHistory(delta) }
         if !dropdownOpen {
             guard delta > 0 else { return .ignored }
             refreshSuggestions(force: true)
@@ -401,6 +406,15 @@ private struct BanquetAddressField: View {
         } else if let h = highlighted {
             highlighted = h == 0 ? nil : h - 1
         }
+        return .handled
+    }
+
+    /// ↑ recalls older evaluated URLs; ↓ walks back toward the newest and then to the draft.
+    private func recallHistory(_ delta: Int) -> KeyPress.Result {
+        guard let value = appVM.recallStep(older: delta < 0, current: text) else { return .handled }
+        closeDropdown()
+        text = value
+        UILog.event("bar", "history recall", ["text": value])
         return .handled
     }
 

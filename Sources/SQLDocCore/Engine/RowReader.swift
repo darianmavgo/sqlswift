@@ -2,7 +2,9 @@ import Foundation
 import SQLite3
 
 extension Doc {
-    public static let maxLimit = 1000
+    /// Largest window one request may return. A Banquet URL with no slice means "all rows"
+    /// (up to `window.all_rows_cap`), so the clamp must not sit below that.
+    public static let maxLimit = max(BehaviorConfig.windowMaxRows, BehaviorConfig.windowAllRowsCap)
 
     /// Fetches one rendered window of a table according to the window specification.
     public func rows(window: Window) throws -> Page {

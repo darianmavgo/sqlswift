@@ -71,9 +71,17 @@ final class UICommandRunner {
             let before = appVM.banquetURLString(for: vm)
             appVM.openBanquet(urlString: rest, activeTableVM: vm)
             appVM.noteBanquetNavigation(from: before, to: appVM.banquetURLString(for: appVM.activeTableVM))
+        case "allrowscap":
+            // Lower the "all rows" ceiling so the capped case is testable on a small table; 0 = default.
+            vm?.allRowsCap = Int(rest).flatMap { $0 > 0 ? $0 : nil } ?? BehaviorConfig.windowAllRowsCap
         case "navreset":
             appVM.resetNavigation()
             appVM.setSuggestionsSnapshot([])
+        case "recall":
+            // ↑ / ↓ in the bar: `recall up|down`. Goes through the same state the key handler uses.
+            if let t = appVM.recallStep(older: rest == "up", current: appVM.banquetBarText) {
+                appVM.banquetBarInjectedText = t
+            }
         case "back":
             appVM.navigateBack()
         case "forward":

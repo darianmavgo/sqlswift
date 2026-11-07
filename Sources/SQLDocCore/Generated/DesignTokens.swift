@@ -38,7 +38,7 @@ public enum DesignToken {
     /// Loading placeholder bars
     public static let skeleton = ColorToken(light: "#eceef0", dark: "#2a2c2f")
     /// Primary accent colour  (a document _style may override this)
-    public static let accent = ColorToken(light: "#2563eb", dark: "#2563eb")
+    public static let accent = ColorToken(light: "#0f9d58", dark: "#0f9d58")
     /// Find-match highlight background
     public static let markBg = ColorToken(light: "#ffd54f", dark: "#ffd54f")
     /// Find-match highlight text
@@ -105,5 +105,5 @@ public enum DesignToken {
     public static let zoomDefault: Double = 1.0
 
     /// Bare hex string of the default accent, for Style() defaults.
-    public static let accentHex = "#2563eb"
+    public static let accentHex = "#0f9d58"
 }

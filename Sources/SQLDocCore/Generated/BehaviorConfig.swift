@@ -64,6 +64,10 @@ public enum BehaviorConfig {
     public static let textCellDisplayMaxChars: Int = 400
     /// Query time at/above which the timing badge turns amber  [0..… us]
     public static let timingSlowThresholdUs: Int = 15000
+    /// Colour scheme on first launch, before a theme is picked in the app (a document _style theme still wins under system)
+    public static let uiThemeDefault: String = "dark"
+    /// Rows loaded when a Banquet URL has no slice ("all rows"); a bigger table shows [0:cap] in the bar  [1000..5000000 rows]
+    public static let windowAllRowsCap: Int = 50000
     /// Rows per fetched window during virtualized scroll  [20..1000 rows]
     public static let windowBlockRows: Int = 100
     /// Rows returned when a request omits a limit  [10..1000 rows]

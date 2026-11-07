@@ -37,6 +37,8 @@ public final class AppViewModel: ObservableObject {
     @Published public var openDocuments: [DocEntry] = []
     @Published public var recentItems: [RecentItem] = []
     @Published public var workspaceItems: [RecentItem] = []
+    /// True while the database's table list (banquet-table-list-style) is showing instead of one table.
+    @Published public var isTableListVisible: Bool = false
     @Published public var selectedTableName: String = "" {
         didSet {
             if selectedTableName != oldValue { UILog.event("nav", "select table", ["table": selectedTableName]) }
@@ -217,7 +219,15 @@ public final class AppViewModel: ObservableObject {
 
     public let session = SessionManager.shared
     public let recents = RecentsManager.shared
-    public let banquetHistory = BanquetHistory.shared
+    /// Shared by default; a test assigns its own so parallel cases can't see each other's URLs.
+    public var banquetHistory = BanquetHistory.shared
+    /// ↑/↓ history recall state for the bar. Not @Published (changes per keystroke).
+    public var barRecall = BanquetRecall()
+
+    /// One ↑ (`older`) or ↓ step through history. Returns the text to put in the bar.
+    public func recallStep(older: Bool, current: String) -> String? {
+        barRecall.step(older: older, current: current, entries: banquetHistory.entries)
+    }
     public let persistence = StatePersistenceManager.shared
 
     private var isRestoringSession = false
@@ -612,8 +622,10 @@ public final class AppViewModel: ObservableObject {
         let sortCol = tableVM?.sortColumn
         let isSortDesc = tableVM?.isSortDesc ?? false
         let filters = tableVM?.filters
-        let offset = tableVM?.currentOffset ?? 0
-        let limit = tableVM?.pageLimit ?? 100
+        // Showing every row: no slice, so the URL says what the user typed.
+        let allRows = tableVM?.isShowingAllRows ?? false
+        let offset: Int? = allRows ? nil : Int(tableVM?.currentOffset ?? 0)
+        let limit: Int? = allRows ? nil : (tableVM?.pageLimit ?? 100)
 
         // Preserve explicit column projection if set via Banquet or manual column hiding
         let selectCols: [String]
@@ -672,7 +684,7 @@ public final class AppViewModel: ObservableObject {
             isSortDesc: isSortDesc,
             whereClause: whereClause,
             limit: limit,
-            offset: Int(offset),
+            offset: offset,
             groupBy: tableVM?.banquetGroupBy,
             having: tableVM?.banquetHaving,
             extraQueryParams: extraParams,
@@ -693,21 +705,25 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func paginateFirst(tableVM: TableViewModel) {
+        guard !tableVM.isShowingAllRows else { return }   // one page holds every row
         executeBanquetSlice(offset: 0, limit: tableVM.pageLimit, tableVM: tableVM)
     }
 
     public func paginatePrevious(tableVM: TableViewModel) {
+        guard !tableVM.isShowingAllRows else { return }   // one page holds every row
         let prevOffset = max(0, tableVM.currentOffset - Int64(tableVM.pageLimit))
         executeBanquetSlice(offset: prevOffset, limit: tableVM.pageLimit, tableVM: tableVM)
     }
 
     public func paginateNext(tableVM: TableViewModel) {
+        guard !tableVM.isShowingAllRows else { return }   // one page holds every row
         let step = Int64(tableVM.currentPage?.rows.count ?? tableVM.pageLimit)
         let nextOffset = tableVM.currentOffset + max(1, step)
         executeBanquetSlice(offset: nextOffset, limit: tableVM.pageLimit, tableVM: tableVM)
     }
 
     public func paginateLast(tableVM: TableViewModel) {
+        guard !tableVM.isShowingAllRows else { return }   // one page holds every row
         let total = !tableVM.filters.isEmpty
             ? tableVM.filteredCount
             : (tableVM.tableCount.known ? tableVM.tableCount.rows : nil)
@@ -755,6 +771,9 @@ public final class AppViewModel: ObservableObject {
             }
             return url
         }
+        if isTableListVisible, let entry = activeDocEntry {
+            return entry.doc.path + "/tables"
+        }
         let b = banquet(for: tableVM)
         return BanquetSerializer.canonicalString(for: b)
     }
@@ -792,6 +811,7 @@ public final class AppViewModel: ObservableObject {
     /// Forget back/forward and URL history (ui-e2e starts each case from a clean slate).
     public func resetNavigation() {
         navStack = BanquetNavStack()
+        barRecall.reset()
         banquetHistory.clear()
         updateNavFlags()
     }
@@ -934,11 +954,13 @@ public final class AppViewModel: ObservableObject {
         // 3. Database Overview (tables or empty table name)
         if b.table == "tables" || b.table.isEmpty {
             self.isFolderBrowserVisible = false
+            self.isTableListVisible = activeDocEntry != nil
             self.pendingBanquet = nil
             return
         }
 
         // 4. Select table if specified
+        self.isTableListVisible = false
         if !b.table.isEmpty, let entry = activeDocEntry {
             if entry.doc.tables.contains(where: { $0.name == b.table }) {
                 self.isFolderBrowserVisible = false

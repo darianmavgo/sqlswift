@@ -882,6 +882,39 @@ func runAllTests() async {
         expectEqual(BanquetHistory(storageKey: "k", defaults: d, maxEntries: 3).entries, ["d", "c"])
     }
 
+    await test("BanquetRecall: ↑ older, ↓ newer, back to draft") {
+        var r = BanquetRecall()
+        let e = ["c", "b", "a"]
+        expectEqual(r.step(older: false, current: "x", entries: e), nil)   // ↓ with no walk
+        expectEqual(r.step(older: true, current: "draft", entries: e), "c")
+        expectEqual(r.step(older: true, current: "c", entries: e), "b")
+        expectEqual(r.step(older: true, current: "b", entries: e), "a")
+        expectEqual(r.step(older: true, current: "a", entries: e), nil)    // oldest: stay
+        expectEqual(r.step(older: false, current: "a", entries: e), "b")
+        expectEqual(r.step(older: false, current: "b", entries: e), "c")
+        expectEqual(r.step(older: false, current: "c", entries: e), "draft")
+        expectTrue(!r.isRecalling)
+        expectEqual(r.step(older: true, current: "new", entries: []), nil) // empty history
+        var q = BanquetRecall()
+        expectEqual(q.step(older: true, current: "c", entries: e), "b")   // skips the URL already showing
+        expectEqual(q.step(older: false, current: "b", entries: e), "c")  // ↓ returns to the draft
+    }
+
+    await test("TableList: ordering, header, empty placeholder") {
+        func sec(_ n: String, _ rows: Int64) -> TableListSection {
+            TableListSection(name: n, rowCount: rows, rowCountText: "\(rows)",
+                             category: TableListCategory.classify(rowCount: rows),
+                             columns: ["a", "b"], cells: [])
+        }
+        let ordered = TableListBuilder.ordered([sec("empty", 0), sec("big", 5000), sec("t3", 3),
+                                                sec("huge", 90000), sec("t19", 19), sec("t20", 20)])
+        // Tiny (1-19) first by count desc, then Large (20+) by count desc, then Empty.
+        expectEqual(ordered.map(\.name), ["t19", "t3", "huge", "big", "t20", "empty"])
+        expectEqual(sec("steps", 3152).header, "=== Table: steps (3152 rows, 2 columns) ===")
+        expectEqual(sec("one", 1).header, "=== Table: one (1 row, 2 columns) ===")
+        expectEqual(TableListBuilder.emptyRows(columnCount: 3), [["(Empty)", "", ""]])
+    }
+
     await test("BanquetNavStack: back/forward, truncation, cap") {
         var n = BanquetNavStack(maxEntries: 3)
         expectTrue(!n.canGoBack && !n.canGoForward)
@@ -897,6 +930,24 @@ func runAllTests() async {
         n.visit("d"); n.visit("e")                    // cap of 3 drops the oldest
         expectEqual(n.entries, ["c", "d", "e"])
         expectEqual(n.current, "e")
+    }
+
+    await test("Theme: configured first-launch default applies only until a theme is chosen") {
+        let suite = "sqldoc.test.\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: suite)!
+        defer { d.removePersistentDomain(forName: suite) }
+        let p = StatePersistenceManager(defaults: d)
+        // Nothing stored: whatever config/seed.sql `ui.theme_default` says.
+        expectEqual(p.themeMode, AppThemeMode(rawValue: BehaviorConfig.uiThemeDefault))
+        expectEqual(BehaviorConfig.uiThemeDefault, "dark")
+        // An explicit choice, including System, is kept and never overridden by the default.
+        p.themeMode = .system
+        expectEqual(StatePersistenceManager(defaults: d).themeMode, .system)
+        p.themeMode = .light
+        expectEqual(StatePersistenceManager(defaults: d).themeMode, .light)
+        // The default accent is the configured token, not a literal in Style.swift.
+        expectEqual(Style.default.accent, DesignToken.accentHex)
+        expectEqual(DesignToken.accentHex, "#0f9d58")
     }
 
     print("\n-------------------------------------------------------")

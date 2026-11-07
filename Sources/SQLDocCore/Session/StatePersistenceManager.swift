@@ -16,7 +16,7 @@ public enum AppThemeMode: String, CaseIterable, Sendable {
 
 public final class StatePersistenceManager: @unchecked Sendable {
     public static let shared = StatePersistenceManager()
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
     private let lock = NSLock()
 
     private let keyTheme = "sqldoc.settings.theme"
@@ -25,7 +25,7 @@ public final class StatePersistenceManager: @unchecked Sendable {
     private let keySortPrefix = "sqldoc.sort."
     private let keyHiddenColsPrefix = "sqldoc.hiddencols."
 
-    public init() {}
+    public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
     // MARK: - Theme Mode
     public var themeMode: AppThemeMode {
@@ -34,7 +34,9 @@ public final class StatePersistenceManager: @unchecked Sendable {
             defer { lock.unlock() }
             guard let raw = defaults.string(forKey: keyTheme),
                   let mode = AppThemeMode(rawValue: raw) else {
-                return .system
+                // Nothing stored yet: the configured first-launch scheme (config/seed.sql
+                // `ui.theme_default`). A theme picked in the app is stored and always wins.
+                return AppThemeMode(rawValue: BehaviorConfig.uiThemeDefault) ?? .system
             }
             return mode
         }

@@ -327,8 +327,21 @@ public final class TableViewModel: ObservableObject {
 
     @Published public var customPageLimit: Int? = nil
 
-    /// Rows per page — honours customPageLimit from Banquet, else document's `_head` `page_size`, else 100.
-    public var pageLimit: Int { customPageLimit ?? doc.style.pageSize ?? 100 }
+    /// Set when a submitted Banquet URL carried no slice: the user asked for the whole table,
+    /// not a 100-row page. Cleared by any URL that names a slice.
+    @Published public var showAllRows = false
+
+    /// Ceiling for "all rows" (`window.all_rows_cap`). Overridable so tests can exercise the cap.
+    public var allRowsCap: Int = BehaviorConfig.windowAllRowsCap
+
+    /// Rows per page — all rows (up to the cap) when asked, else customPageLimit from Banquet,
+    /// else document's `_head` `page_size`, else 100.
+    public var pageLimit: Int { showAllRows ? allRowsCap : (customPageLimit ?? doc.style.pageSize ?? 100) }
+
+    /// True while every row of the table is on screen, so the bar needs no slice. When the
+    /// load hit the cap the table may be longer, and the bar shows `[0:cap]` instead so the
+    /// URL never claims more than the grid has.
+    public var isShowingAllRows: Bool { showAllRows && (currentPage?.rows.count ?? 0) < allRowsCap }
 
     /// True when the active Banquet query contains SQL expressions (e.g. `count(*)`, `min(date)`, `max(date)`),
     /// `GROUP BY`, `HAVING`, or a complex SQL `WHERE` clause that requires direct SQL execution.
@@ -711,7 +724,12 @@ public final class TableViewModel: ObservableObject {
     // MARK: - Banquet Integration
 
     /// Applies query parameters, sort, filters, column projection, and slice offset from a parsed Banquet object.
-    public func applyBanquet(_ banquet: Banquet) {
+    /// What a URL without a slice means. `.showAll` is a submitted URL: no slice = every row.
+    /// `.keep` is live-apply of text still being edited: leave the paging mode alone so
+    /// deleting `[0:100]` doesn't flicker the grid before Return.
+    public enum UnslicedPaging { case showAll, keep }
+
+    public func applyBanquet(_ banquet: Banquet, unsliced: UnslicedPaging = .showAll) {
         let oldSortCol = self.sortColumn
         let oldSortDesc = self.isSortDesc
         let oldFilters = self.filters
@@ -765,8 +783,14 @@ public final class TableViewModel: ObservableObject {
         // 4. Limit / Page Size
         if let limit = banquet.limit, limit > 0 {
             self.customPageLimit = limit
+            self.showAllRows = false
         } else {
             self.customPageLimit = nil
+            if banquet.offset != nil {
+                self.showAllRows = false          // `[100:]` = a page starting at 100
+            } else if unsliced == .showAll {
+                self.showAllRows = true           // no slice at all = the whole table
+            }
         }
 
         // 5. Filters & Where clause

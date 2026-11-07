@@ -94,10 +94,10 @@ UI layer maps them to `Color` via `AppTheme`; Core stays SwiftUI-free):
 ```swift
 public enum DesignToken {
     public static let page       = ColorToken(light: "#ffffff", dark: "#202124")
-    public static let accent     = ColorToken(light: "#2563eb", dark: "#2563eb")
+    public static let accent     = ColorToken(light: "#0f9d58", dark: "#0f9d58")   // mac override of #2563eb
     public static let rowHeight:      CGFloat = 26            // ← override(token,row-height,mac)
     public static let transitionFast = Duration.milliseconds(120)
-    public static let accentHex      = "#2563eb"
+    public static let accentHex      = "#0f9d58"
 }
 
 public enum BehaviorConfig {
@@ -117,7 +117,7 @@ Migrate the scattered literals onto these:
 | `let version = "0.3.0"` (SQLDocCLI/main.swift) | `AppIdentity.version` | **done** |
 | `Doc.sampleAnchors = 24` (ColumnSampler.swift) | `BehaviorConfig.colwidthSampleAnchors` | todo |
 | `Doc.findChunk = 250_000` (Finder.swift) | `BehaviorConfig.findChunkRows` | todo |
-| `Style(accent: "#2563eb", …)` (Style.swift) | `DesignToken.accentHex` | todo |
+| `Style(accent: "#2563eb", …)` (Style.swift) | `DesignToken.accentHex` | done |
 | `26 * appVM.zoomScale` (VirtualizedGridView) | `DesignToken.rowHeight * appVM.zoomScale` | todo |
 | `zoomScale = min(2.0, …)` (AppViewModel) | `BehaviorConfig.zoomMax` + `zoomStepMode` | todo |
 | `gutterWidth = 60` (Grid views) | `DesignToken.gutterMinWidth` | todo |
@@ -258,7 +258,8 @@ down (delete each row once both platforms match the canonical value):
 | `LSHandlerRank` | `Owner` | `Alternate` | keep both | `identity.doc_handler_rank` per platform |
 | app icon | tangerine `sqldoc.icns` | none | **share `sqldoc.icns`** (copied to `config/assets/AppIcon.icns`) | `identity.icon.*` |
 | favicon / theme-color / manifest | none | n/a | **generated** from `icon-master.png` + `identity` | `identity` + `icon_target` |
-| accent default | `#2563eb` | `#2563eb` | match ✓ | — |
+| accent default | `#2563eb` | `#0f9d58` | **diverges, intentional** | `override(token,accent,mac)` — SqlSwift look from the sample `_style` |
+| first-launch theme | system | dark | **diverges, intentional** | `override(setting,ui.theme_default,mac)`; a theme chosen in the app always wins |
 | connect pragmas | 5, via DSN/exec | same 5, via exec | match ✓ | now generated from one list |
 | `_style` key aliases | 6 | 6 | match ✓ | now generated |
 | column min/default width | 56 / measured | 100 / 120 | **56 / 120** | mac clamps to be re-derived from tokens |

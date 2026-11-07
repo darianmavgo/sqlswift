@@ -77,7 +77,11 @@ struct BanquetUITests {
     func caseMatchesWindowState(_ c: UICase) async throws {
         let db = fixtureDBPath
         let appVM = AppViewModel()
-        appVM.resetNavigation()   // history is shared storage; every case starts empty
+        // Cases run in parallel: give each its own history store, not the shared one.
+        let suite = "sqldoc.uitest.\(UUID().uuidString)"
+        appVM.banquetHistory = BanquetHistory(storageKey: "history", defaults: UserDefaults(suiteName: suite)!)
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        appVM.resetNavigation()
         // MainView calls syncActiveTableVM when the document or table changes; mirror that.
         var lastSelection = ""
         func lifecycle() {
