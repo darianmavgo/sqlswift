@@ -53,7 +53,7 @@ public struct TableProbe: Sendable, Equatable {
 public struct QueryStyle {
     public static let probeSampleRows = 1000
     public static let wideTableLimit = 60
-    public static let trimColumnCap = 20
+    public static let trimColumnCap = 40
     public static let lowCardinalityMax = 12
 
     // MARK: - Column Name Classification Rules

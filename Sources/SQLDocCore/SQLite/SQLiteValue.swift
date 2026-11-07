@@ -156,7 +156,7 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
         case .text(let s): return s
         case .integer(let v): return String(v)
         case .real(let v): return String(v)
-        case .blob(let b): return "◼ \(formatBytes(b))"
+        case .blob(let b): return "<BLOB: \(b) bytes>"
         case .null: return nil
         }
     }
@@ -176,7 +176,7 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
         case .text(let s):
             return s
         case .blob(let count):
-            return "◼ \(formatBytes(count))"
+            return "<BLOB: \(count) bytes>"
         }
     }
 
@@ -192,7 +192,7 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
         case .text(let s):
             return s
         case .blob(let count):
-            return "◼ \(formatBytes(count))"
+            return "<BLOB: \(count) bytes>"
         }
     }
 
@@ -208,7 +208,7 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
         case .text(let s):
             return s
         case .blob(let count):
-            return "◼ \(formatBytes(count))"
+            return "<BLOB: \(count) bytes>"
         }
     }
 

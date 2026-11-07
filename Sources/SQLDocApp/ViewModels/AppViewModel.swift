@@ -723,14 +723,16 @@ public final class AppViewModel: ObservableObject {
             if let sub = selectedSubfolder, !sub.isEmpty {
                 url += "/" + sub
             }
-            url += "/databases"
+            // Never emit a `databases` segment: a bare container ends in "/", and a sort
+            // clause is itself clause-like so the parser still reads it as a collection.
+            if !url.hasSuffix("/") { url += "/" }
             switch folderSortOrder {
             case .size:
-                url += "/-size_bytes"
+                url += "-size_bytes"
             case .modified:
-                url += "/-modified"
+                url += "-modified"
             case .name:
-                url += "/+name"
+                url += "+name"
             case .folder:
                 break
             }

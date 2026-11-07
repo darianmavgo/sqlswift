@@ -130,7 +130,7 @@ public struct VirtualizedGridView: View {
                             } else if let page = tableVM.currentPage, !page.rows.isEmpty {
                                 rows(for: page)
                             } else {
-                                emptyState(icon: "tray", message: "This table is empty.")
+                                emptyState(icon: "tray", message: tableVM.tableCount.known && tableVM.tableCount.rows == 0 && tableVM.filters.isEmpty ? "This table is empty." : "No results found")
                                     .frame(width: contentWidth, height: 240)
                             }
                         }
