@@ -44,12 +44,21 @@ public struct BanquetBarView: View {
             }
 
             toolbarIconButton(
-                icon: "folder.badge.plus",
+                icon: "folder",
                 label: nil,
                 isActive: false,
-                help: "Open Folder… (⇧⌘O)"
+                help: "Open Database File or Folder… (⌘O)"
             ) {
-                appVM.showOpenFolderPanel()
+                appVM.showOpenPanel()
+            }
+
+            toolbarIconButton(
+                icon: "arrow.clockwise",
+                label: nil,
+                isActive: false,
+                help: "Reload from Disk (⌘R)"
+            ) {
+                appVM.reload()
             }
         }
     }
@@ -287,7 +296,8 @@ private struct BanquetAddressField: View {
               let b = try? BanquetParser.parse(value.trimmingCharacters(in: .whitespacesAndNewlines))
         else { return }
 
-        let resolved = FolderScanner.resolveLocalPath(b.dataSetPath)
+        // Pure string comparison: this runs on main per keystroke pause, so no filesystem probes.
+        let resolved = (b.dataSetPath.hasPrefix("/") ? b.dataSetPath : "/" + b.dataSetPath) as String
         let sameDoc = b.dataSetPath.isEmpty
             || entry.doc.path == resolved
             || (entry.doc.path as NSString).lastPathComponent == b.dataSetPath
@@ -338,28 +348,30 @@ private struct BanquetAddressField: View {
         UILog.event("bar", "submit", ["text": trimmed])
         let before = lastSynced
         let priorError = appVM.errorMessage
-        appVM.openBanquet(urlString: resolvedURL, activeTableVM: tableVM)
+        // The open runs on a worker; the bar stays responsive and finishes in the completion.
+        appVM.openBanquet(urlString: resolvedURL, activeTableVM: tableVM) { [self] in
 
-        // A failure of *this* submit stays in the bar (red border + message) so the text
-        // can be fixed; the modal alert is for errors that didn't come from typing here.
-        if let e = appVM.errorMessage, e != priorError {
-            appVM.errorMessage = priorError
-            inlineError = e
-            errorForText = override ?? text
+            // A failure of *this* submit stays in the bar (red border + message) so the text
+            // can be fixed; the modal alert is for errors that didn't come from typing here.
+            if let e = appVM.errorMessage, e != priorError {
+                appVM.errorMessage = priorError
+                inlineError = e
+                errorForText = override ?? text
+                closeDropdown()
+                return
+            }
+            isFocused = false
             closeDropdown()
-            return
-        }
-        isFocused = false
-        closeDropdown()
-        let fresh = appVM.banquetURLString(for: tableVM)
-        lastSynced = fresh
-        text = fresh
-        appVM.noteBanquetNavigation(from: before, to: fresh)
-        // A file that opens asynchronously only reaches its final URL a moment later.
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            let settled = appVM.banquetURLString(for: tableVM)
-            if settled != fresh, !isFocused { appVM.noteBanquetNavigation(from: fresh, to: settled) }
+            let fresh = appVM.banquetURLString(for: tableVM)
+            lastSynced = fresh
+            text = fresh
+            appVM.noteBanquetNavigation(from: before, to: fresh)
+            // A file that opens asynchronously only reaches its final URL a moment later.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                let settled = appVM.banquetURLString(for: tableVM)
+                if settled != fresh, !isFocused { appVM.noteBanquetNavigation(from: fresh, to: settled) }
+            }
         }
     }
 

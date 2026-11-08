@@ -3,6 +3,10 @@
   "cases": [
     { "name": "plain table (no slice = all rows)", "steps": ["url {DB}/telemetry"],
       "expect": { "table": "telemetry", "url": "{DB}/telemetry", "sort": "", "filters": 0, "offset": 0, "pageLimit": 50000, "rowsLoaded": 10000, "visibleColumns": ["id","device_id","timestamp","temperature","humidity","pressure","raw_payload"] } },
+    { "name": "col,* pins the column first and does not repeat it", "steps": ["url {DB}/telemetry/device_id,*"],
+      "expect": { "url": "{DB}/telemetry/device_id,*", "visibleColumns": ["device_id","id","timestamp","temperature","humidity","pressure","raw_payload"] } },
+    { "name": "reordered columns round-trip", "steps": ["url {DB}/telemetry/humidity,device_id,*"],
+      "expect": { "url": "{DB}/telemetry/humidity,device_id,*", "visibleColumns": ["humidity","device_id","id","timestamp","temperature","pressure","raw_payload"] } },
     { "name": "sort descending", "steps": ["url {DB}/telemetry/-id[0:100]"],
       "expect": { "url": "{DB}/telemetry/-id[0:100]", "sort": "id desc", "rowsLoaded": 100 } },
     { "name": "slice notation", "steps": ["url {DB}/telemetry/+temperature[200:250]"],

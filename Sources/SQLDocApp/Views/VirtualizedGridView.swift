@@ -23,6 +23,7 @@ public struct VirtualizedGridView: View {
 
     /// Row-number gutter, sized to the digits it must show.
     private var gutterWidth: CGFloat {
+        if tableVM.hidesRowNumbers { return 10 * zoom }
         let lastOrdinal = (tableVM.currentPage?.start ?? 0) + Int64(tableVM.currentPage?.rows.count ?? 0)
         let digits = max(3, String(max(1, lastOrdinal)).count)
         return max(DesignToken.gutterMinWidth, CGFloat(digits) * 8 * zoom + 20)
@@ -209,7 +210,7 @@ public struct VirtualizedGridView: View {
         let isRowSelected = appVM.selectedRowIndex == index
 
         return HStack(spacing: 0) {
-            Text(SQLiteValueFormatBridge.ordinal(rowOrdinal))
+            Text(tableVM.hidesRowNumbers ? "" : SQLiteValueFormatBridge.ordinal(rowOrdinal))
                 .font(.system(size: 11 * zoom, weight: .regular, design: .monospaced))
                 .foregroundColor(palette.dim)
                 .padding(.trailing, 8)

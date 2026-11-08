@@ -69,8 +69,9 @@ final class UICommandRunner {
         case "go":
             // Same bookkeeping as submitting in the bar: remember where we were and where we went.
             let before = appVM.banquetURLString(for: vm)
-            appVM.openBanquet(urlString: rest, activeTableVM: vm)
-            appVM.noteBanquetNavigation(from: before, to: appVM.banquetURLString(for: appVM.activeTableVM))
+            appVM.openBanquet(urlString: rest, activeTableVM: vm) {
+                appVM.noteBanquetNavigation(from: before, to: appVM.banquetURLString(for: appVM.activeTableVM))
+            }
         case "allrowscap":
             // Lower the "all rows" ceiling so the capped case is testable on a small table; 0 = default.
             vm?.allRowsCap = Int(rest).flatMap { $0 > 0 ? $0 : nil } ?? BehaviorConfig.windowAllRowsCap

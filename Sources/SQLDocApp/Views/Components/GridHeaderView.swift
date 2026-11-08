@@ -10,6 +10,8 @@ public struct GridHeaderView: View {
     @State private var draggingCol: String?
     @State private var dragStartWidth: CGFloat = 0
     @State private var hoverCol: String?
+    @State private var dragSource: String?
+    private var dropTarget: String? { hoverCol }
 
     public init(tableVM: TableViewModel, zoomScale: Double = 1.0,
                 gutterWidth: CGFloat = 60,
@@ -25,7 +27,7 @@ public struct GridHeaderView: View {
 
     public var body: some View {
         HStack(spacing: 0) {
-            Text("#")
+            Text(tableVM.hidesRowNumbers ? "" : "#")
                 .font(.system(size: 11 * zoom, weight: .bold, design: .monospaced))
                 .foregroundColor(palette.dim)
                 .padding(.trailing, 8)
@@ -75,6 +77,16 @@ public struct GridHeaderView: View {
         .contentShape(Rectangle())
         .onHover { hoverCol = $0 ? col.name : (hoverCol == col.name ? nil : hoverCol) }
         .onTapGesture { tableVM.sortBy(column: col.name) }
+        .onDrag {
+            dragSource = col.name
+            return NSItemProvider(object: col.name as NSString)
+        }
+        .onDrop(of: [.plainText], delegate: ColumnDropDelegate(target: col.name, tableVM: tableVM, source: $dragSource))
+        .overlay(alignment: .leading) {
+            if dropTarget == col.name, dragSource != col.name {
+                Rectangle().fill(Color.accentColor).frame(width: 2)
+            }
+        }
         .contextMenu { sortMenu(col) }
         .overlay(alignment: .trailing) {
             Rectangle().fill(palette.ruleStrong.opacity(0.75)).frame(width: 1)
@@ -152,4 +164,20 @@ public struct GridHeaderView: View {
             )
             .onTapGesture(count: 2) { tableVM.autoFitWidth(column: col.name) }
     }
+}
+
+/// Dropping a header on another moves the dragged column into that slot.
+private struct ColumnDropDelegate: DropDelegate {
+    let target: String
+    let tableVM: TableViewModel
+    @Binding var source: String?
+
+    func performDrop(info: DropInfo) -> Bool {
+        defer { source = nil }
+        guard let source, source != target else { return false }
+        tableVM.moveColumn(source, onto: target)
+        return true
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
 }

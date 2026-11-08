@@ -83,8 +83,13 @@ public final class TableViewModel: ObservableObject {
     // Background-job label for the status bar ("counting…", "sampling…")
     @Published public var backgroundJob: String? = nil
 
-    /// Columns actually shown in the grid (ordered for the active `displayKind`, hidden removed).
-    public var visibleColumns: [Column] {
+    /// Columns pulled to the front, in this order (`device_id,*` in a URL, or a header drag).
+    /// Everything not listed follows in the display kind's own order, so `*` keeps meaning
+    /// "the rest" — and a column is never shown twice.
+    @Published public var columnOrder: [String] = []
+
+    /// Columns before `columnOrder` is applied: the display kind's own order, hidden removed.
+    private var baseVisibleColumns: [Column] {
         switch displayKind {
         case .raw:
             return columns.filter { !hiddenColumns.contains($0.name) }
@@ -96,13 +101,63 @@ public final class TableViewModel: ObservableObject {
         }
     }
 
+    /// Columns actually shown in the grid (ordered for the active `displayKind`, hidden removed).
+    public var visibleColumns: [Column] {
+        let base = baseVisibleColumns
+        guard !columnOrder.isEmpty else { return base }
+        var front: [Column] = []
+        var taken = Set<String>()
+        for name in columnOrder {
+            if let c = base.first(where: { $0.name.lowercased() == name.lowercased() }), taken.insert(c.name).inserted {
+                front.append(c)
+            }
+        }
+        return front + base.filter { !taken.contains($0.name) }
+    }
+
+    /// Trim is the compact view: no `#` gutter. When the primary key leads it already numbers
+    /// the rows, and when columns overflow the viewport the gutter only costs width.
+    public var hidesRowNumbers: Bool { displayKind == .trim }
+
+    /// Moves `name` to sit where `target` is (header drag-and-drop).
+    public func moveColumn(_ name: String, onto target: String) {
+        var names = visibleColumns.map(\.name)
+        guard name != target, let from = names.firstIndex(of: name), let to = names.firstIndex(of: target) else { return }
+        names.insert(names.remove(at: from), at: to)
+        columnOrder = names
+        UILog.event("grid", "column moved", ["col": name, "onto": target])
+    }
+
+    /// The leading names a URL must list (followed by `*`) to reproduce the current order,
+    /// or empty when the order is the display kind's own.
+    var columnOrderPrefix: [String] {
+        let shown = visibleColumns.map(\.name)
+        let base = baseVisibleColumns.map(\.name)
+        for k in 0...shown.count {
+            let prefix = Set(shown[..<k])
+            if Array(shown[k...]) == base.filter({ !prefix.contains($0) }) { return Array(shown[..<k]) }
+        }
+        return shown
+    }
+
     /// Names of the columns the grid is actually showing, or empty when it shows
     /// them all. Lets the Banquet bar reflect Trim mode and hidden columns, not
     /// just columns hidden by hand.
     public var projectedColumnNames: [String] {
         guard displayKind != .summary else { return [] }
         let shown = visibleColumns.map(\.name)
-        return shown.isEmpty || shown.count == columns.count ? [] : shown
+        if shown.isEmpty { return [] }
+        // Trim is written as `display=trim`; `*` then stands for its smart ordering.
+        if displayKind == .trim && hiddenColumns.isEmpty {
+            let prefix = columnOrderPrefix
+            return prefix.isEmpty || prefix.count == shown.count ? [] : prefix + ["*"]
+        }
+        if shown.count == columns.count {
+            // Everything shown: only an explicit order needs writing, as `a,b,*`.
+            let prefix = columnOrderPrefix
+            return prefix.isEmpty ? [] : prefix + ["*"]
+        }
+        return shown
     }
 
     private var findTask: Task<Void, Never>?
@@ -534,6 +589,7 @@ public final class TableViewModel: ObservableObject {
 
     public func showAllColumns() {
         banquetSelect = ["*"]
+        columnOrder = []
         hiddenColumns.removeAll()
         if columns != rawColumns && displayKind != .summary {
             columns = rawColumns
@@ -752,25 +808,35 @@ public final class TableViewModel: ObservableObject {
 
         // 2. Select projection (visible / hidden columns or custom SQL expressions)
         self.banquetSelect = banquet.select.isEmpty ? ["*"] : banquet.select
+        if let kind = Self.displayKind(in: banquet.extraQueryParams), kind != displayKind { setDisplayKind(kind) }
         let rawColNames = Set(rawColumns.map { $0.name.lowercased() })
-        let hasExprSelect = !self.banquetSelect.isEmpty && self.banquetSelect != ["*"] && self.banquetSelect.contains { !rawColNames.contains($0.lowercased()) }
+        let named = banquet.select.filter { $0 != "*" }
+        let hasStar = banquet.select.contains("*")
+        // Plain column names (optionally with `*`) are a view over the grid, not SQL to run.
+        // `SELECT device_id, *` in SQLite repeats device_id; here `*` means "the rest".
+        let onlyColumns = !named.isEmpty && named.allSatisfy { rawColNames.contains($0.lowercased()) }
+        let hasExprSelect = !named.isEmpty && !onlyColumns
 
         if hasExprSelect {
             self.hiddenColumns = []
+            self.columnOrder = []
             if self.displayKind == .trim {
                 self.displayKind = .raw
             }
-        } else if banquet.select != ["*"] && !banquet.select.isEmpty {
-            let selectSet = Set(banquet.select.map { $0.lowercased() })
-            var newHidden = Set<String>()
-            for col in rawColumns {
-                if !selectSet.contains(col.name.lowercased()) {
-                    newHidden.insert(col.name)
-                }
+        } else if onlyColumns {
+            self.columnOrder = named
+            self.banquetSelect = ["*"]
+            if hasStar {
+                self.hiddenColumns = []
+            } else {
+                let selectSet = Set(named.map { $0.lowercased() })
+                self.hiddenColumns = Set(rawColumns.map(\.name).filter { !selectSet.contains($0.lowercased()) })
+                // An explicit list is the whole view: don't let Trim hide a column it names.
+                if self.displayKind == .trim { self.displayKind = .raw }
             }
-            self.hiddenColumns = newHidden
         } else {
             self.hiddenColumns = []
+            self.columnOrder = []
         }
 
         // 3. GroupBy & Having preservation
@@ -814,6 +880,14 @@ public final class TableViewModel: ObservableObject {
         } else {
             loadPage(offset: targetOffset, limit: targetLimit)
         }
+    }
+
+    /// `display=trim|summary|raw` from the extra query params.
+    static func displayKind(in params: [String]) -> DisplayKind? {
+        for p in params where p.lowercased().hasPrefix("display=") {
+            return DisplayKind(rawValue: String(p.dropFirst("display=".count)).lowercased())
+        }
+        return nil
     }
 
     // MARK: - Column widths

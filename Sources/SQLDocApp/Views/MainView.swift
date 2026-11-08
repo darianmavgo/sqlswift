@@ -86,7 +86,7 @@ public struct MainView: View {
         }
         .sheet(isPresented: $appVM.showQueryConsole) {
             if let entry = appVM.activeDocEntry {
-                QueryConsoleView(doc: entry.doc, seedTable: appVM.selectedTableName) {
+                QueryConsoleView(doc: entry.doc, seedTable: appVM.selectedTableName, seedSQL: appVM.queryConsoleSeedSQL()) {
                     appVM.showQueryConsole = false
                 }
             }

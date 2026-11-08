@@ -90,8 +90,7 @@ struct BanquetUITests {
         }
         for step in c.steps {
             UICommandRunner.execute(step.replacingOccurrences(of: "{DB}", with: db), appVM: appVM)
-            lifecycle()
-            await settle(appVM)
+            await settle(appVM, lifecycle: lifecycle)
         }
         let s = appVM.uiStateSnapshot()
         let g = s["grid"] as? [String: Any] ?? [:]
@@ -121,14 +120,21 @@ struct BanquetUITests {
         // The URL the bar shows must be a fixed point: feeding it back changes nothing.
         if let shown = s["banquetURL"] as? String {
             appVM.openBanquet(urlString: shown, activeTableVM: appVM.activeTableVM)
-            lifecycle()
-            await settle(appVM)
+            await settle(appVM, lifecycle: lifecycle)
             #expect(appVM.uiStateSnapshot()["banquetURL"] as? String == shown, "bar URL is not stable when re-applied")
         }
     }
 
     /// Wait for background page loads to finish (and stay finished briefly).
-    private func settle(_ appVM: AppViewModel) async {
+    private func settle(_ appVM: AppViewModel, lifecycle: () -> Void) async {
+        // Opens run on worker threads now: wait for them, then mirror MainView's lifecycle hook.
+        var opens = 0
+        lifecycle()
+        while appVM.inFlightOpens > 0, opens < 500 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+            opens += 1
+            lifecycle()
+        }
         for _ in 0..<3 {
             try? await Task.sleep(nanoseconds: 40_000_000)
             var spins = 0

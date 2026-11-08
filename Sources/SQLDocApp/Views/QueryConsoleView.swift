@@ -36,10 +36,10 @@ public struct QueryConsoleView: View {
     let onDismiss: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
-    public init(doc: Doc, seedTable: String, onDismiss: @escaping () -> Void) {
+    public init(doc: Doc, seedTable: String, seedSQL: String? = nil, onDismiss: @escaping () -> Void) {
         _model = StateObject(wrappedValue: QueryConsoleModel(
             doc: doc,
-            seed: seedTable.isEmpty ? "SELECT 1" : "SELECT * FROM \(Doc.quoteIdent(seedTable)) LIMIT 100"))
+            seed: seedSQL ?? (seedTable.isEmpty ? "SELECT 1" : "SELECT * FROM \(Doc.quoteIdent(seedTable)) LIMIT 100")))
         self.onDismiss = onDismiss
     }
 

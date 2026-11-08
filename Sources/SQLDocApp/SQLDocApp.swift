@@ -117,6 +117,9 @@ struct SqlSwiftApp: App {
                 }
                 .keyboardShortcut("l", modifiers: .command)
 
+                Button("Reload") { appVM.reload() }
+                    .keyboardShortcut("r", modifiers: .command)
+
                 Button("Back") { appVM.navigateBack() }
                     .keyboardShortcut("[", modifiers: .command)
                     .disabled(!appVM.canNavigateBack)

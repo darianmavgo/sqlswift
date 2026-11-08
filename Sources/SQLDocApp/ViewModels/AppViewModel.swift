@@ -75,6 +75,8 @@ public final class AppViewModel: ObservableObject {
     }
 
     // Busy overlay state
+    /// Opens (file or Banquet URL) running on worker threads; lets tests and UI scripts wait for quiescence.
+    public private(set) var inFlightOpens = 0
     @Published public var isBusy: Bool = false
     @Published public var busyTitle: String = ""
     @Published public var busyMessage: String = ""
@@ -384,37 +386,68 @@ public final class AppViewModel: ObservableObject {
         return found.sorted { $0.lastOpened > $1.lastOpened }
     }
 
-    public func open(path: String, isImmutable: Bool = false, targetTable: String? = nil) {
+    /// Opens a file or folder without ever blocking the main thread: path probing and
+    /// `Doc.open` (header read, `PRAGMA journal_mode`, schema discovery — any of which can
+    /// wait on a locked WAL or a slow volume) run on a worker; only the state swap is on main.
+    /// `completion` fires on the main actor once the open has succeeded or failed.
+    public func open(path: String, isImmutable: Bool = false, targetTable: String? = nil,
+                     completion: (@MainActor () -> Void)? = nil) {
         UILog.event("nav", "open", ["path": path, "table": targetTable ?? "-"])
-        let resolved = FolderScanner.resolveLocalPath(path)
-        if FolderScanner.isDirectory(resolved) {
-            openFolder(path: resolved, showBrowser: true)
-            return
+        let session = self.session
+        inFlightOpens += 1
+        // Only show the busy overlay if the open is actually slow.
+        let busyTimer = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            let name = (path as NSString).lastPathComponent
+            self?.setBusy(title: "Opening \(name)", message: "Reading schema…")
         }
 
-        do {
-            let entry = try session.open(path: resolved, options: DocOptions(isImmutable: isImmutable))
-            refreshSession()
-            setActiveDocument(entry, preferredTable: targetTable)
-            self.isFolderBrowserVisible = false
-            // If currentFolderPath isn't an ancestor of this file, scan the file's parent folder for the sidebar
-            let parentDir = (resolved as NSString).deletingLastPathComponent
-            if currentFolderPath.isEmpty || !resolved.hasPrefix(currentFolderPath) {
-                openFolder(path: parentDir, showBrowser: false)
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let resolved = FolderScanner.resolveLocalPath(path)
+            let isDir = FolderScanner.isDirectory(resolved)
+            var entry: DocEntry?
+            var failure: Error?
+            if !isDir {
+                do { entry = try session.open(path: resolved, options: DocOptions(isImmutable: isImmutable)) }
+                catch { failure = error }
             }
-            errorMessage = nil
-        } catch {
-            // Not a SQLite file? Try converting a plain-text format we understand.
-            if FileImporter.canImport(path: resolved) {
-                importAndOpen(path: resolved)
-                return
+            let result = (entry, failure)
+            await MainActor.run {
+                busyTimer.cancel()
+                guard let self else { return }
+                self.inFlightOpens -= 1
+                if self.isBusy, self.busyTitle.hasPrefix("Opening ") { self.clearBusy() }
+                defer { completion?() }
+
+                if isDir {
+                    self.openFolder(path: resolved, showBrowser: true)
+                    return
+                }
+                if let entry = result.0 {
+                    self.refreshSession()
+                    self.setActiveDocument(entry, preferredTable: targetTable)
+                    self.isFolderBrowserVisible = false
+                    // If currentFolderPath isn't an ancestor of this file, scan the file's parent folder for the sidebar
+                    let parentDir = (resolved as NSString).deletingLastPathComponent
+                    if self.currentFolderPath.isEmpty || !resolved.hasPrefix(self.currentFolderPath) {
+                        self.openFolder(path: parentDir, showBrowser: false)
+                    }
+                    self.errorMessage = nil
+                    return
+                }
+                // Not a SQLite file? Try converting a plain-text format we understand.
+                if FileImporter.canImport(path: resolved) {
+                    self.importAndOpen(path: resolved)
+                    return
+                }
+                let ext = (resolved as NSString).pathExtension.lowercased()
+                if ["xlsx", "xls", "pdf"].contains(ext) {
+                    self.errorMessage = ".\(ext) import isn't supported yet — convert it to CSV or SQLite first."
+                    return
+                }
+                self.errorMessage = result.1?.localizedDescription ?? "Could not open \(resolved)"
             }
-            let ext = (resolved as NSString).pathExtension.lowercased()
-            if ["xlsx", "xls", "pdf"].contains(ext) {
-                errorMessage = ".\(ext) import isn't supported yet — convert it to CSV or SQLite first."
-                return
-            }
-            errorMessage = error.localizedDescription
         }
     }
 
@@ -537,6 +570,27 @@ public final class AppViewModel: ObservableObject {
                 open(url: url)
             }
         }
+    }
+
+    /// Re-reads whatever is on screen from disk: the folder listing, or the active table
+    /// (caches dropped, count re-estimated, current page re-fetched).
+    public func reload() {
+        UILog.event("nav", "reload")
+        if isFolderBrowserVisible || activeDocEntry == nil {
+            guard !currentFolderPath.isEmpty else { return }
+            openFolder(path: currentFolderPath, selectSubfolder: selectedSubfolder, showBrowser: isFolderBrowserVisible)
+        } else {
+            activeTableVM?.reloadFromDisk()
+        }
+    }
+
+    /// The SQL the current Banquet URL translates to, for the SQL console's first view.
+    public func queryConsoleSeedSQL() -> String? {
+        guard let vm = activeTableVM, activeDocEntry != nil, !selectedTableName.isEmpty,
+              !isTableListVisible else { return nil }
+        var b = banquet(for: vm)
+        if b.select.isEmpty || b.select == ["*"] { b.select = ["*"] }
+        return BanquetComposer.compose(b)
     }
 
     public func showOpenFolderPanel() {
@@ -672,9 +726,18 @@ public final class AppViewModel: ObservableObject {
             whereClause = tableVM?.banquetWhereClause
         }
 
-        let extraParams = (tableVM?.extraQueryParams.isEmpty == false)
+        var extraParams = (tableVM?.extraQueryParams.isEmpty == false)
             ? (tableVM?.extraQueryParams ?? [])
             : self.extraQueryParams
+        // The display mode is part of the view, so it travels in the URL: a bookmark or
+        // pasted link reopens in Trim/Summary rather than whatever the table defaults to.
+        extraParams.removeAll { $0.lowercased().hasPrefix("display=") }
+        if let tableVM, tableVM.displayKind != .raw {
+            let explicitList = !selectCols.contains("*") && selectCols != ["*"]
+            if tableVM.displayKind == .summary || !explicitList {
+                extraParams.append("display=\(tableVM.displayKind.rawValue)")
+            }
+        }
 
         return Banquet(
             dataSetPath: dataset,
@@ -862,32 +925,46 @@ public final class AppViewModel: ObservableObject {
     }
 
     /// Navigates to a Banquet URL or local file/folder path: resolves dataset path, folder, table, sort, and filters.
-    public func openBanquet(urlString: String, activeTableVM: TableViewModel? = nil) {
+    public func openBanquet(urlString: String, activeTableVM: TableViewModel? = nil,
+                            completion: (@MainActor () -> Void)? = nil) {
         UILog.event("banquet", "open url", ["url": urlString])
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { completion?(); return }
 
-        // Direct check: if the user typed or pasted a folder path or file path directly, open it immediately!
-        let directPath = FolderScanner.resolveLocalPath(trimmed)
-        if FolderScanner.isDirectory(directPath) {
-            openFolder(path: directPath, showBrowser: true)
-            return
-        }
-        if FileManager.default.fileExists(atPath: directPath) {
-            open(path: directPath)
-            return
-        }
-
-        do {
-            let b = try BanquetParser.parse(trimmed)
-            applyBanquet(b, activeTableVM: activeTableVM)
-        } catch {
-            errorMessage = "Failed to parse Banquet URL: \(error.localizedDescription)"
+        // Filesystem probes can stall (network volumes, iCloud placeholders), so they never run on main.
+        inFlightOpens += 1
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let directPath = FolderScanner.resolveLocalPath(trimmed)
+            let isDir = FolderScanner.isDirectory(directPath)
+            let exists = isDir || FileManager.default.fileExists(atPath: directPath)
+            await MainActor.run {
+                guard let self else { return }
+                defer { self.inFlightOpens -= 1 }
+                // A folder or file path typed or pasted directly opens immediately.
+                if isDir {
+                    self.openFolder(path: directPath, showBrowser: true)
+                    completion?()
+                    return
+                }
+                if exists {
+                    self.open(path: directPath, completion: completion)
+                    return
+                }
+                do {
+                    let b = try BanquetParser.parse(trimmed)
+                    self.applyBanquet(b, activeTableVM: activeTableVM, completion: completion)
+                } catch {
+                    self.errorMessage = "Failed to parse Banquet URL: \(error.localizedDescription)"
+                    completion?()
+                }
+            }
         }
     }
 
-    /// Applies a parsed `Banquet` query onto the application state.
-    public func applyBanquet(_ b: Banquet, activeTableVM: TableViewModel? = nil) {
+    /// Applies a parsed `Banquet` query onto the application state. Opening the target
+    /// database is asynchronous, so the table-level steps run from `finishApplyBanquet`.
+    public func applyBanquet(_ b: Banquet, activeTableVM: TableViewModel? = nil,
+                             completion: (@MainActor () -> Void)? = nil) {
         self.pendingBanquet = b
         self.extraQueryParams = b.extraQueryParams
 
@@ -927,6 +1004,7 @@ public final class AppViewModel: ObservableObject {
             openFolder(path: rootFolder, selectSubfolder: subfolder, showBrowser: true)
             self.isFolderBrowserVisible = true
             self.pendingBanquet = nil
+            completion?()
             return
         }
 
@@ -937,20 +1015,32 @@ public final class AppViewModel: ObservableObject {
                 openFolder(path: resolved, showBrowser: true)
                 self.isFolderBrowserVisible = true
                 self.pendingBanquet = nil
+                completion?()
                 return
             }
             if let current = activeDocEntry, current.doc.path == resolved || (current.doc.path as NSString).lastPathComponent == b.dataSetPath {
                 self.isFolderBrowserVisible = false
             } else if let existing = openDocuments.first(where: { $0.doc.path == resolved || ($0.doc.path as NSString).lastPathComponent == b.dataSetPath }) {
                 setActiveDocument(existing)
-            } else if FileManager.default.fileExists(atPath: resolved) {
-                open(path: resolved)
             } else {
-                errorMessage = "Cannot find database or folder at '\(resolved)'"
+                // Open off-main, then continue with the table-level steps.
+                open(path: resolved) { [weak self] in
+                    guard let self else { completion?(); return }
+                    if self.activeDocEntry == nil || self.errorMessage != nil {
+                        completion?()
+                        return
+                    }
+                    self.finishApplyBanquet(b, activeTableVM: activeTableVM)
+                    completion?()
+                }
                 return
             }
         }
+        finishApplyBanquet(b, activeTableVM: activeTableVM)
+        completion?()
+    }
 
+    private func finishApplyBanquet(_ b: Banquet, activeTableVM: TableViewModel?) {
         // 3. Database Overview (tables or empty table name)
         if b.table == "tables" || b.table.isEmpty {
             self.isFolderBrowserVisible = false
