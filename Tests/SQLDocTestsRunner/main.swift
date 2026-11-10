@@ -950,6 +950,424 @@ func runAllTests() async {
         expectEqual(DesignToken.accentHex, "#0f9d58")
     }
 
+    // Edit mode (docs/BanquetEditStyle.md)
+    func makeEditDB() throws -> String {
+        let p = (NSTemporaryDirectory() as NSString).appendingPathComponent("edit_\(UUID().uuidString).db")
+        let c = try SQLiteConnection(path: p, readOnly: false)
+        try c.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL, qty INTEGER, price REAL, note TEXT)")
+        try c.exec("INSERT INTO t VALUES (1,'a',10,1.5,NULL),(2,'b',20,2.5,'x')")
+        try c.exec("CREATE VIEW v AS SELECT * FROM t")
+        try c.exec("CREATE TABLE w (k TEXT PRIMARY KEY, val TEXT) WITHOUT ROWID")
+        c.close()
+        return p
+    }
+
+    await test("EditBuffer: stage, no-op drop, undo/redo, revert") {
+        let b = EditBuffer()
+        let e1 = CellEdit(table: "t", rowID: 1, column: "qty", original: .integer(10), new: .integer(11))
+        b.stage(e1)
+        expectEqual(b.count, 1)
+        expectEqual(b.pending(table: "t", rowID: 1, column: "qty"), .integer(11))
+        // Back to the original drops the entry.
+        b.stage(CellEdit(table: "t", rowID: 1, column: "qty", original: .integer(11), new: .integer(10)))
+        expectEqual(b.count, 0)
+        expectTrue(b.undo()); expectEqual(b.count, 1)
+        expectTrue(b.undo()); expectEqual(b.count, 0)
+        expectTrue(!b.undo())
+        expectTrue(b.redo()); expectEqual(b.count, 1)
+        b.revert()
+        expectEqual(b.count, 0); expectTrue(!b.canUndo)
+    }
+
+    await test("CellCoercion: affinity, bad input, NULL rules") {
+        let int = Column(name: "qty", type: "INTEGER")
+        let real = Column(name: "price", type: "REAL")
+        let text = Column(name: "name", type: "TEXT", notNull: true)
+        expectEqual(try? CellCoercion.parse(" 42 ", for: int).get(), .integer(42))
+        expectTrue((try? CellCoercion.parse("4.2", for: int).get()) == nil)
+        expectEqual(try? CellCoercion.parse("2.5", for: real).get(), .real(2.5))
+        expectTrue((try? CellCoercion.parse("abc", for: real).get()) == nil)
+        expectEqual(try? CellCoercion.parse("", for: text).get(), .text(""))
+        expectTrue((try? CellCoercion.null(for: text).get()) == nil)
+        expectEqual(try? CellCoercion.null(for: int).get(), SQLiteValue.null)
+    }
+
+    await test("EditSession: commit persists, conflict rolls back everything") {
+        let path = try makeEditDB()
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let doc = try Doc.open(path: path)
+        defer { doc.close() }
+        let s = try EditSession(doc: doc)
+        defer { s.close() }
+
+        s.buffer.stage(CellEdit(table: "t", rowID: 1, column: "qty", original: .integer(10), new: .integer(99)))
+        s.buffer.stage(CellEdit(table: "t", rowID: 2, column: "note", original: .text("x"), new: .null))
+        try s.commit()
+        expectEqual(s.buffer.count, 0)
+        let check = try SQLiteConnection(path: path)
+        expectEqual(try check.queryRow("SELECT qty FROM t WHERE id=1")?.first, .integer(99))
+        expectEqual(try check.queryRow("SELECT note FROM t WHERE id=2")?.first, SQLiteValue.null)
+        check.close()
+
+        // Stale original on the second edit: whole commit must roll back, including the first.
+        s.buffer.stage(CellEdit(table: "t", rowID: 1, column: "name", original: .text("a"), new: .text("A")))
+        s.buffer.stage(CellEdit(table: "t", rowID: 2, column: "name", original: .text("STALE"), new: .text("B")))
+        var conflicted = false
+        do { try s.commit() } catch let e as EditError { if case .conflict = e { conflicted = true } }
+        expectTrue(conflicted)
+        let after = try SQLiteConnection(path: path)
+        expectEqual(try after.queryRow("SELECT name FROM t WHERE id=1")?.first, .text("a"))
+        after.close()
+        expectEqual(s.buffer.count, 2) // buffer kept so the user can see/resolve
+    }
+
+    await test("EditSession: eligibility and immutable refusal; read connection stays query_only") {
+        let path = try makeEditDB()
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let doc = try Doc.open(path: path)
+        defer { doc.close() }
+        expectEqual(EditSession.ineligibleReason(doc: doc, table: "t"), nil)
+        expectTrue(EditSession.ineligibleReason(doc: doc, table: "v") != nil)
+        expectTrue(EditSession.ineligibleReason(doc: doc, table: "w") != nil)
+        var refused = false
+        do { _ = try EditSession(doc: try Doc.open(path: path, options: DocOptions(isImmutable: true))) }
+        catch { refused = true }
+        expectTrue(refused)
+        var wrote = true
+        do { try doc.fg.exec("UPDATE t SET qty=0") } catch { wrote = false }
+        expectTrue(!wrote, "viewer connection must stay read-only")
+    }
+
+    // Query control (docs/GUIStability.md, technique 3)
+    // A statement that never finishes on its own.
+    let endless = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n"
+
+    await test("QueryControl: budget stops a runaway statement with .timedOut") {
+        let conn = try SQLiteConnection(path: ":memory:", readOnly: false)
+        defer { conn.close() }
+        let start = Date()
+        var timedOut = false
+        do { _ = try conn.query(endless, control: QueryControl(budgetMs: 150)) }
+        catch SQLiteError.timedOut { timedOut = true }
+        expectTrue(timedOut, "expected .timedOut")
+        expectTrue(Date().timeIntervalSince(start) < 3, "budget should stop it promptly")
+        // The connection is usable afterwards and the handler is gone.
+        expectEqual(try conn.queryRow("SELECT 41 + 1")?.first, .integer(42))
+    }
+
+    await test("QueryControl: token cancels from another thread; next query unaffected") {
+        let conn = try SQLiteConnection(path: ":memory:", readOnly: false)
+        defer { conn.close() }
+        let token = CancelToken()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) { token.cancel() }
+        let start = Date()
+        var cancelled = false
+        do { _ = try conn.query(endless, control: QueryControl(token: token)) }
+        catch SQLiteError.cancelled { cancelled = true }
+        expectTrue(cancelled, "expected .cancelled")
+        expectTrue(Date().timeIntervalSince(start) < 3, "cancel should land promptly")
+        expectEqual(try conn.queryRow("SELECT 7")?.first, .integer(7))
+        // A token cancelled before the statement starts means it never runs.
+        var skipped = false
+        do { _ = try conn.query("SELECT 1", control: QueryControl(token: token)) }
+        catch SQLiteError.cancelled { skipped = true }
+        expectTrue(skipped, "pre-cancelled token must not run")
+    }
+
+    await test("QueryControl: superseded loads queued on one connection do not run") {
+        let conn = try SQLiteConnection(path: ":memory:", readOnly: false)
+        defer { conn.close() }
+        // Three loads requested in a row; each supersedes the one before, as
+        // TableViewModel.beginLoad does. Only the last may produce rows.
+        let tokens = [CancelToken(), CancelToken(), CancelToken()]
+        let outcomes = Outcomes()
+        for (i, token) in tokens.enumerated() {
+            let sql = i < 2 ? endless : "SELECT 99"
+            DispatchQueue.global().async {
+                do {
+                    let rows = try conn.query(sql, control: QueryControl(budgetMs: 20_000, token: token))
+                    outcomes.record(i, rows.first?.first?.intValue.map { "rows:\($0)" } ?? "empty")
+                } catch SQLiteError.cancelled { outcomes.record(i, "cancelled") }
+                catch { outcomes.record(i, "error") }
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+            if i < 2 { token.cancel() }
+        }
+        // Without cancellation the first statement would hold the connection for
+        // its whole 20 s budget; with it, all three settle almost at once.
+        let start = Date()
+        while outcomes.all.count < 3 && Date().timeIntervalSince(start) < 5 {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        expectEqual(outcomes.all, ["cancelled", "cancelled", "rows:99"])
+    }
+
+    await test("QueryControl: Doc.runQuery and Doc.rows honour budget and token") {
+        let p = (NSTemporaryDirectory() as NSString).appendingPathComponent("qc_\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(atPath: p) }
+        let c = try SQLiteConnection(path: p, readOnly: false)
+        try c.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
+        try c.exec("INSERT INTO t VALUES (1,'a'),(2,'b')")
+        c.close()
+        let doc = try Doc.open(path: p)
+        defer { doc.close() }
+
+        var timedOut = false
+        do { _ = try doc.runQuery(endless, control: QueryControl(budgetMs: 150)) }
+        catch SQLiteError.timedOut { timedOut = true }
+        expectTrue(timedOut, "console query must time out")
+        // Counts and find share that connection; they must work straight after.
+        expectEqual(try doc.runQuery("SELECT count(*) FROM t").rows.first?.first, .integer(2))
+
+        let dead = CancelToken()
+        dead.cancel()
+        var cancelled = false
+        do { _ = try doc.rows(window: Window(table: "t", limit: 10), control: QueryControl(token: dead)) }
+        catch SQLiteError.cancelled { cancelled = true }
+        expectTrue(cancelled, "page load must honour its token")
+        expectEqual(try doc.rows(window: Window(table: "t", limit: 10)).rows.count, 2)
+        expectEqual(Doc.queryRowCap, BehaviorConfig.queryRowCap)
+
+        // Page loads run on their own connection so metadata reads on `fg` never
+        // queue behind them; it is opened the same way and is just as read-only.
+        expectTrue(doc.pages !== doc.fg && doc.pages !== doc.bg)
+        var wrote = true
+        do { try doc.pages.exec("UPDATE t SET v = 'x'") } catch { wrote = false }
+        expectTrue(!wrote, "the page connection must stay read-only")
+        // A long page load holds `pages`, not `fg`: metadata stays instant meanwhile.
+        let slow = CancelToken()
+        let started = Date()
+        DispatchQueue.global().async {
+            _ = try? doc.pages.query(endless, control: QueryControl(budgetMs: 2_000, token: slow))
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let t0 = Date()
+        expectEqual(doc.estimateRows(for: "t").known, true)
+        expectEqual(try doc.columns(for: "t").count, 2)
+        expectTrue(Date().timeIntervalSince(t0) < 0.2, "metadata waited behind a page load")
+        slow.cancel()
+        _ = started
+    }
+
+    // Cell-size caps (docs/GUIStability.md, technique 4)
+    await test("TextPrefix: grid pages carry only the head of a huge TEXT cell") {
+        let p = (NSTemporaryDirectory() as NSString).appendingPathComponent("big_\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(atPath: p) }
+        let c = try SQLiteConnection(path: p, readOnly: false)
+        try c.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, body TEXT, n INTEGER)")
+        // 10 MB of ASCII; a value whose cap falls inside a 2-byte character; a short one.
+        try c.exec("INSERT INTO t VALUES (1, printf('%.*c', 10485760, 'x'), 1)")
+        try c.exec("INSERT INTO t VALUES (2, 'a' || replace(printf('%.*c', 3000, 'e'), 'e', 'é'), 2)")
+        try c.exec("INSERT INTO t VALUES (3, 'short', 3)")
+        try c.exec("CREATE TABLE w (k TEXT PRIMARY KEY, body TEXT) WITHOUT ROWID")
+        try c.exec("INSERT INTO w VALUES ('k1', printf('%.*c', 10000, 'y'))")
+        c.close()
+        let doc = try Doc.open(path: p)
+        defer { doc.close() }
+        let cap = BehaviorConfig.textCellFetchMaxBytes
+
+        let page = try doc.rows(window: Window(table: "t", limit: 10))
+        expectTrue(page.rowKeyed)
+        guard case .textPrefix(let head, let total) = page.rows[0][1] else {
+            fatalError("row 1 should be clipped, got \(page.rows[0][1].isPartial)")
+        }
+        expectEqual(total, 10_485_760)
+        expectEqual(head.utf8.count, cap)
+        expectTrue(page.text[0][1].truncated)
+        expectTrue(page.text[0][1].text.count <= BehaviorConfig.textCellDisplayMaxChars + 1)
+
+        // The cut backs up to a character boundary: no replacement characters, no half scalar.
+        guard case .textPrefix(let head2, let total2) = page.rows[1][1] else { fatalError("row 2 should be clipped") }
+        expectEqual(total2, 6001)
+        expectEqual(head2.utf8.count, cap - 1)
+        expectTrue(!head2.unicodeScalars.contains("\u{FFFD}"))
+        expectTrue(head2.hasPrefix("aé") && head2.hasSuffix("é"))
+
+        // Short values and other types are untouched.
+        expectEqual(page.rows[2][1], .text("short"))
+        expectEqual(page.rows[0][2], .integer(1))
+
+        // The whole value is one rowid lookup away.
+        let full = doc.cellValues(table: "t", columns: ["body", "n"], rowID: 1)
+        expectEqual(full?.count, 2)
+        if case .text(let s)? = full?.first { expectEqual(s.utf8.count, 10_485_760) } else { fatalError("expected full text") }
+        expectEqual(full?.last, .integer(1))
+        expectTrue(doc.cellValues(table: "t", columns: ["body"], rowID: 999) == nil)
+
+        // No row key, no way to re-fetch: such pages keep the value whole.
+        let wpage = try doc.rows(window: Window(table: "w", limit: 10))
+        expectTrue(!wpage.rowKeyed)
+        if case .text(let s) = wpage.rows[0][1] { expectEqual(s.utf8.count, 10_000) } else { fatalError("WITHOUT ROWID cell should be whole") }
+        expectTrue(doc.cellValues(table: "w", columns: ["body"], rowID: 1) == nil)
+
+        // The console cuts at the same cap and says so.
+        let qr = try doc.runQuery("SELECT body FROM t ORDER BY id",
+                                  control: QueryControl(maxTextBytes: cap))
+        expectTrue(qr.hasClippedText)
+        expectTrue(try !doc.runQuery("SELECT body FROM t WHERE id = 3", control: QueryControl(maxTextBytes: cap)).hasClippedText)
+        // Uncapped reads (export, find, editor) are unaffected.
+        if case .text(let s)? = try doc.fg.queryRow("SELECT body FROM t WHERE id = 1")?.first {
+            expectEqual(s.utf8.count, 10_485_760)
+        } else { fatalError("uncapped read should be whole") }
+    }
+
+    await test("QueryControl: result byte budget stops an oversized result") {
+        let conn = try SQLiteConnection(path: ":memory:", readOnly: false)
+        defer { conn.close() }
+        let sql = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1000) SELECT printf('%.*c', 1000, 'z') FROM n"
+        var tooLarge = false
+        do { _ = try conn.query(sql, control: QueryControl(maxResultBytes: 100_000)) }
+        catch SQLiteError.resultTooLarge { tooLarge = true }
+        expectTrue(tooLarge, "expected .resultTooLarge")
+        expectEqual(try conn.query(sql, control: QueryControl(maxResultBytes: 2_000_000)).count, 1000)
+    }
+
+    await test("EditSession: a clipped original is refused; the resolved value commits") {
+        let p = (NSTemporaryDirectory() as NSString).appendingPathComponent("bigedit_\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(atPath: p) }
+        let c = try SQLiteConnection(path: p, readOnly: false)
+        try c.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, body TEXT)")
+        try c.exec("INSERT INTO t VALUES (1, printf('%.*c', 20000, 'q'))")
+        c.close()
+        let doc = try Doc.open(path: p)
+        defer { doc.close() }
+        let page = try doc.rows(window: Window(table: "t", limit: 10))
+        let clipped = page.rows[0][1]
+        expectTrue(clipped.isPartial)
+
+        let s = try EditSession(doc: doc)
+        defer { s.close() }
+        s.buffer.stage(CellEdit(table: "t", rowID: 1, column: "body", original: clipped, new: .text("new")))
+        var refused = false
+        do { try s.commit() } catch { refused = true }
+        expectTrue(refused, "a clipped original must never reach the UPDATE")
+        s.buffer.revert()
+
+        // What the grid does instead: fetch the stored value, then stage against it.
+        guard let whole = doc.cellValues(table: "t", columns: ["body"], rowID: 1)?.first else { fatalError("no value") }
+        expectTrue(!whole.isPartial)
+        s.buffer.stage(CellEdit(table: "t", rowID: 1, column: "body", original: whole, new: .text("new")))
+        try s.commit()
+        let check = try SQLiteConnection(path: p)
+        expectEqual(try check.queryRow("SELECT body FROM t WHERE id = 1")?.first, .text("new"))
+        check.close()
+    }
+
+    // Keyset paging under filters and sort, both directions (docs/GUIStability.md, technique 1)
+    await test("Seek paging: forward, backward and from-end match offset paging row for row") {
+        let p = (NSTemporaryDirectory() as NSString).appendingPathComponent("seek_\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(atPath: p) }
+        let c = try SQLiteConnection(path: p, readOnly: false)
+        // 1,000 rows; `v` repeats heavily and is NULL for every 7th row; rowids have gaps.
+        try c.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, grp INTEGER, v INTEGER, s TEXT)")
+        try c.exec("""
+            WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1000)
+            INSERT INTO t SELECT i * 3, i % 4, CASE WHEN i % 7 = 0 THEN NULL ELSE i % 23 END,
+                                 CASE WHEN i % 11 = 0 THEN NULL ELSE 'k' || (i % 17) END FROM n
+            """)
+        c.close()
+        let doc = try Doc.open(path: p)
+        defer { doc.close() }
+        let limit = 37
+        let grp1 = [ColumnFilter(column: "grp", op: .equals, value: "1")]
+
+        struct Case { let name: String; let filters: [ColumnFilter]; let sort: String?; let desc: Bool; let numeric: Bool }
+        let cases = [
+            Case(name: "plain", filters: [], sort: nil, desc: false, numeric: false),
+            Case(name: "filtered", filters: grp1, sort: nil, desc: false, numeric: false),
+            Case(name: "sorted asc", filters: [], sort: "v", desc: false, numeric: false),
+            Case(name: "sorted desc", filters: [], sort: "v", desc: true, numeric: false),
+            Case(name: "sorted numeric desc", filters: [], sort: "v", desc: true, numeric: true),
+            Case(name: "filtered sorted asc", filters: grp1, sort: "v", desc: false, numeric: false),
+            Case(name: "filtered sorted desc", filters: grp1, sort: "v", desc: true, numeric: false),
+            Case(name: "filtered sorted text desc", filters: grp1, sort: "s", desc: true, numeric: false),
+        ]
+
+        for k in cases {
+            func window(offset: Int64) -> Window {
+                Window(table: "t", limit: limit, offset: offset, sort: k.sort, desc: k.desc,
+                       forceOffset: false, sortNumeric: k.numeric, filters: k.filters)
+            }
+            // Ground truth: every page by counted offset. (Unfiltered, unsorted jumps
+            // normally interpolate on rowid, which is approximate when ids have gaps.)
+            let plain = k.filters.isEmpty && k.sort == nil
+            var truth: [[Int64]] = []
+            var off: Int64 = 0
+            while true {
+                var tw = window(offset: off)
+                tw.forceOffset = plain
+                var pg = try doc.rows(window: tw)
+                if plain {
+                    // The forced-offset path selects no rowid; `id` is the rowid alias.
+                    pg.rowIDs = pg.rows.map { $0[0].intValue ?? 0 }
+                }
+                if pg.rows.isEmpty { break }
+                expectTrue(!pg.path.contains("keyset"), "\(k.name): offset pages must not seek")
+                truth.append(pg.rowIDs)
+                off += Int64(pg.rows.count)
+                if pg.rows.count < limit { break }
+            }
+            let total = truth.reduce(0) { $0 + $1.count }
+            expectTrue(truth.count >= 5, "\(k.name): fixture too small")
+            let sortIdx = k.sort.map { $0 == "v" ? 2 : 3 }
+
+            // Forward: seek from the last row of each page.
+            var page = try doc.rows(window: window(offset: 0))
+            expectEqual(page.rowIDs, truth[0], "\(k.name): first page")
+            expectTrue(page.rowKeyed)
+            for i in 1..<truth.count {
+                var w = window(offset: Int64(i * limit))
+                w.useAfter = true
+                w.after = page.rowIDs.last!
+                w.afterSortValue = sortIdx.map { page.rows.last![$0] }
+                page = try doc.rows(window: w)
+                expectTrue(page.path.contains("keyset"), "\(k.name): forward page \(i) took \(page.path)")
+                expectEqual(page.rowIDs, truth[i], "\(k.name): forward page \(i)")
+            }
+
+            // From the end: the last `limit` rows, wherever the page boundaries fall.
+            var e = window(offset: Int64(max(0, total - limit)))
+            e.fromEnd = true
+            let tail = try doc.rows(window: e)
+            expectTrue(tail.path.contains("keyset"), "\(k.name): tail took \(tail.path)")
+            expectEqual(tail.rowIDs, Array(truth.joined().suffix(limit)), "\(k.name): tail")
+            expectEqual(tail.start, Int64(total - limit))
+
+            // Backward: from the last full page down to the second, seeking from each first row.
+            page = tail
+            // Re-anchor on a page boundary: seek back from the tail's rows that follow the last full page.
+            var lastFull = window(offset: Int64((truth.count - 1) * limit))
+            lastFull.useAfter = true
+            lastFull.after = truth[truth.count - 2].last!
+            lastFull.afterSortValue = sortIdx.map { _ in
+                let prev = truth[truth.count - 2].last!
+                return ((try? doc.fg.queryRow("SELECT \(k.sort!) FROM t WHERE id = ?", args: [prev]))??.first) ?? .null
+            }
+            page = try doc.rows(window: lastFull)
+            expectEqual(page.rowIDs, truth[truth.count - 1], "\(k.name): last page by seek")
+            for i in stride(from: truth.count - 2, through: 1, by: -1) {
+                var w = window(offset: Int64(i * limit))
+                w.backward = true
+                w.after = page.rowIDs.first!
+                w.afterSortValue = sortIdx.map { page.rows.first![$0] }
+                page = try doc.rows(window: w)
+                expectTrue(page.path.contains("keyset"), "\(k.name): backward page \(i) took \(page.path)")
+                expectEqual(page.rowIDs, truth[i], "\(k.name): backward page \(i)")
+            }
+            // Stepping back past the start lands on the first page, not a short one.
+            var w = window(offset: 0)
+            w.backward = true
+            w.after = truth[0][5]
+            w.afterSortValue = sortIdx.map { _ in (try! doc.rows(window: window(offset: 0))).rows[5][sortIdx!] }
+            expectEqual(try doc.rows(window: w).rowIDs, truth[0], "\(k.name): backward into the start")
+        }
+
+        // A clipped sort value cannot anchor a seek; the reader falls back rather than guess.
+        var w = Window(table: "t", limit: limit, after: 30, useAfter: true, offset: 37, sort: "s")
+        w.afterSortValue = .textPrefix("k1", totalBytes: 9999)
+        expectEqual(try doc.rows(window: w).path, "sorted-offset")
+    }
+
     print("\n-------------------------------------------------------")
     print("Results: \(passed) passed, \(failed) failed")
     print("-------------------------------------------------------\n")
@@ -987,3 +1405,16 @@ Task {
 }
 
 RunLoop.main.run()
+
+/// Thread-safe slot-per-index results for the concurrency tests.
+final class Outcomes: @unchecked Sendable {
+    private let lock = NSLock()
+    private var slots: [Int: String] = [:]
+    func record(_ i: Int, _ value: String) {
+        lock.lock(); slots[i] = value; lock.unlock()
+    }
+    var all: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return slots.keys.sorted().map { slots[$0] ?? "" }
+    }
+}

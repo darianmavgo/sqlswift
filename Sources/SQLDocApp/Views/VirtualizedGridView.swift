@@ -8,6 +8,15 @@ public struct VirtualizedGridView: View {
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var isGridFocused: Bool
 
+    // Where the grid is scrolled to, quantised to blocks so a scroll re-renders
+    // the window of rows and columns once per block rather than once per frame.
+    @State private var firstRowBlock = 0
+    @State private var xBlock: CGFloat = 0
+    /// Row the dev `scroll` command wants at the top (see `scrollAnchor`).
+    @State private var scrollAnchorRow = 0
+
+    fileprivate typealias GridCol = (col: Column, fullIndex: Int, width: CGFloat, x: CGFloat, fmt: CellFormat.Kind)
+
     public init(appVM: AppViewModel, tableVM: TableViewModel) {
         self.appVM = appVM
         self.tableVM = tableVM
@@ -34,8 +43,11 @@ public struct VirtualizedGridView: View {
     private var layout: [(col: Column, fullIndex: Int, width: CGFloat, x: CGFloat, fmt: CellFormat.Kind)] {
         var out: [(Column, Int, CGFloat, CGFloat, CellFormat.Kind)] = []
         var x: CGFloat = 0
+        // One pass to index the columns; a per-column search is quadratic on wide tables.
+        var indexByName: [String: Int] = [:]
+        for (i, c) in tableVM.columns.enumerated() where indexByName[c.name] == nil { indexByName[c.name] = i }
         for col in tableVM.visibleColumns {
-            guard let i = tableVM.columns.firstIndex(where: { $0.name == col.name }) else { continue }
+            guard let i = indexByName[col.name] else { continue }
             let w = (tableVM.columnWidths[col.name] ?? DesignToken.colDefaultWidth) * zoom
             let fmt = tableVM.smartFormat ? CellFormat.kind(forColumn: col.name, isNumeric: col.isNumeric) : .none
             out.append((col, i, w, x, fmt))
@@ -61,7 +73,7 @@ public struct VirtualizedGridView: View {
         .focused($isGridFocused)
         .onKeyPress { press in
             // The find field or Banquet URL editor owns the keyboard while open.
-            (appVM.isFindBarVisible || appVM.isBanquetBarEditing) ? .ignored : handleKeyPress(press)
+            (appVM.isFindBarVisible || appVM.isBanquetBarEditing || appVM.edit.editingCell != nil) ? .ignored : handleKeyPress(press)
         }
         .onAppear { isGridFocused = !appVM.isFindBarVisible && !appVM.isBanquetBarEditing }
         .onChange(of: appVM.isFindBarVisible) { _, visible in
@@ -78,6 +90,13 @@ public struct VirtualizedGridView: View {
         }
         .onChange(of: tableVM.selectRowRequest) { _, req in
             if let idx = req { selectRow(idx); tableVM.selectRowRequest = nil }
+        }
+        .onChange(of: tableVM.inspectRequest?.row) { _, _ in
+            guard let req = tableVM.inspectRequest, let page = tableVM.currentPage,
+                  req.row >= 0, req.row < page.rows.count,
+                  let col = tableVM.columns.firstIndex(where: { $0.name == req.column }) else { return }
+            tableVM.inspectRequest = nil
+            inspect(page: page, row: req.row, col: col)
         }
     }
 
@@ -116,6 +135,10 @@ public struct VirtualizedGridView: View {
             }
 
             GeometryReader { geo in
+                let cols = layout
+                let width = gutterWidth + cols.reduce(0) { $0 + $1.width }
+                let visCols = columnWindow(cols, viewportWidth: geo.size.width)
+                let bodyHeight = max(0, geo.size.height - DesignToken.rowHeight * zoom)
                 ScrollView(.horizontal, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: 0) {
                         // Header: scrolls horizontally with the columns, pinned above
@@ -123,22 +146,55 @@ public struct VirtualizedGridView: View {
                         GridHeaderView(tableVM: tableVM,
                                        zoomScale: appVM.zoomScale,
                                        gutterWidth: gutterWidth,
-                                       palette: palette)
+                                       palette: palette,
+                                       columns: visCols.map { $0.col },
+                                       leadingPad: visCols.first?.x ?? 0,
+                                       totalWidth: width)
 
+                        ScrollViewReader { proxy in
                         ScrollView(.vertical, showsIndicators: true) {
-                            if tableVM.isLoading && tableVM.currentPage == nil {
-                                skeletonRows
-                            } else if let page = tableVM.currentPage, !page.rows.isEmpty {
-                                rows(for: page)
-                            } else {
-                                emptyState(icon: "tray", message: tableVM.tableCount.known && tableVM.tableCount.rows == 0 && tableVM.filters.isEmpty ? "This table is empty." : "No results found")
-                                    .frame(width: contentWidth, height: 240)
+                            Group {
+                                if tableVM.isLoading && tableVM.currentPage == nil {
+                                    skeletonRows(visCols)
+                                } else if let page = tableVM.currentPage, !page.rows.isEmpty {
+                                    rows(for: page, cols: cols, visCols: visCols, width: width, viewportHeight: bodyHeight)
+                                } else {
+                                    emptyState(icon: "tray", message: tableVM.tableCount.known && tableVM.tableCount.rows == 0 && tableVM.filters.isEmpty ? "This table is empty." : "No results found")
+                                        .frame(width: width, height: 240)
+                                }
                             }
+                            .background(GeometryReader { g in
+                                Color.clear.preference(key: GridScrollYKey.self, value: -g.frame(in: .named("gridV")).minY)
+                            })
                         }
-                        .frame(height: max(0, geo.size.height - DesignToken.rowHeight * zoom))
+                        .coordinateSpace(name: "gridV")
+                        .frame(height: bodyHeight)
+                        .onChange(of: tableVM.scrollRowRequest) { _, row in
+                            guard let row else { return }
+                            UILog.event("grid", "scroll", ["row": row])
+                            scrollAnchorRow = row
+                            tableVM.scrollRowRequest = nil
+                            // Next turn, once the anchor has moved to that row.
+                            DispatchQueue.main.async { proxy.scrollTo(Self.scrollAnchorID, anchor: .top) }
+                        }
+                        }
                     }
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: GridScrollXKey.self, value: -g.frame(in: .named("gridH")).minX)
+                    })
                 }
+                .coordinateSpace(name: "gridH")
                 .background(palette.page)
+                .onPreferenceChange(GridScrollYKey.self) { y in
+                    let quantum = max(1, BehaviorConfig.windowOverscanRows)
+                    let block = max(0, Int(y / max(1, rowHeight))) / quantum * quantum
+                    if block != firstRowBlock { firstRowBlock = block }
+                }
+                .onPreferenceChange(GridScrollXKey.self) { x in
+                    let quantum = CGFloat(max(1, BehaviorConfig.windowOverscanPx))
+                    let block = (max(0, x) / quantum).rounded(.down) * quantum
+                    if block != xBlock { xBlock = block }
+                }
             }
 
             if tableVM.showQuickChart, let page = tableVM.currentPage, !page.rows.isEmpty {
@@ -150,26 +206,69 @@ public struct VirtualizedGridView: View {
 
     // MARK: - Rows
 
-    private func rows(for page: Page) -> some View {
+    private static let scrollAnchorID = "gridScrollAnchor"
+
+    /// Rows worth building: those in view plus a margin either side.
+    private func rowWindow(count: Int, viewportHeight: CGFloat) -> Range<Int> {
+        let over = BehaviorConfig.windowOverscanRows
+        let visible = Int((viewportHeight / max(1, rowHeight)).rounded(.up))
+        let first = min(firstRowBlock, max(0, count - 1))
+        let lo = max(0, first - over)
+        let hi = min(count, first + max(1, over) + visible + over)
+        return lo..<max(lo, hi)
+    }
+
+    /// Columns worth building: those intersecting the viewport plus a margin.
+    /// `x` in the layout is measured from the right edge of the gutter.
+    private func columnWindow(_ cols: [GridCol], viewportWidth: CGFloat) -> [GridCol] {
+        let over = CGFloat(BehaviorConfig.windowOverscanPx)
+        let lo = xBlock - over - gutterWidth
+        let hi = xBlock + over + viewportWidth + over - gutterWidth
+        return cols.filter { $0.x + $0.width > lo && $0.x < hi }
+    }
+
+    /// The grid body. The scroll content is sized for every row and column, but
+    /// only the window near the viewport gets views: a 50,000-row or 500-column
+    /// page costs the same to draw and scroll as a small one.
+    private func rows(
+        for page: Page, cols: [GridCol], visCols: [GridCol], width: CGFloat, viewportHeight: CGFloat
+    ) -> some View {
         let rowCount = page.rows.count
-        let cols = layout
-        let width = gutterWidth + cols.reduce(0) { $0 + $1.width }
-        let barBounds = computeBarBounds(page: page, cols: cols)
-        return LazyVStack(spacing: 0) {
-            ForEach(0..<rowCount, id: \.self) { index in
-                rowView(page: page, index: index, cols: cols, barBounds: barBounds, width: width)
+        // Scans every row, so compute once per page and column set, not per render.
+        let barSignature = tableVM.smartFormat ? cols.map { "\($0.fullIndex):\($0.fmt)" }.joined(separator: ",") : "-"
+        let barBounds = tableVM.pageDerived("barBounds", signature: barSignature) {
+            computeBarBounds(page: page, cols: cols)
+        }
+        let window = rowWindow(count: rowCount, viewportHeight: viewportHeight)
+        let lead = visCols.first?.x ?? 0
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(window, id: \.self) { index in
+                rowView(page: page, index: index, cols: visCols, lead: lead, barBounds: barBounds, width: width)
             }
         }
-        .frame(width: width, alignment: .leading)
-        .background(
-            GridBackdrop(rowCount: rowCount,
+        .background(alignment: .topLeading) {
+            GridBackdrop(firstRow: window.lowerBound,
+                         rowCount: window.count,
                          rowHeight: rowHeight,
                          gutterWidth: gutterWidth,
-                         columnXs: cols.map { $0.x },
-                         totalWidth: width,
+                         columnXs: visCols.map { $0.x },
+                         windowEnd: (visCols.last.map { $0.x + $0.width } ?? 0) + gutterWidth,
                          rule: palette.rule,
                          stripe: palette.stripe)
-        )
+        }
+        .padding(.top, CGFloat(window.lowerBound) * rowHeight)
+        .frame(width: width, height: CGFloat(rowCount) * rowHeight, alignment: .topLeading)
+        .overlay(alignment: .topLeading) { scrollAnchor(rowCount: rowCount) }
+    }
+
+    /// An empty, row-sized view placed at `scrollAnchorRow`. Rows outside the
+    /// window have no view to scroll to, so `scrollTo` targets this instead.
+    private func scrollAnchor(rowCount: Int) -> some View {
+        Color.clear
+            .frame(width: 1, height: rowHeight)
+            .id(Self.scrollAnchorID)
+            .padding(.top, CGFloat(max(0, min(scrollAnchorRow, rowCount - 1))) * rowHeight)
+            .allowsHitTesting(false)
     }
 
     private func computeBarBounds(
@@ -200,7 +299,8 @@ public struct VirtualizedGridView: View {
     private func rowView(
         page: Page,
         index: Int,
-        cols: [(col: Column, fullIndex: Int, width: CGFloat, x: CGFloat, fmt: CellFormat.Kind)],
+        cols: [GridCol],
+        lead: CGFloat,
         barBounds: [Int: Double],
         width: CGFloat
     ) -> some View {
@@ -223,6 +323,9 @@ public struct VirtualizedGridView: View {
                     isGridFocused = true
                 }
 
+            // Stand-in for the columns scrolled off to the left.
+            if lead > 0 { Color.clear.frame(width: lead, height: rowHeight) }
+
             ForEach(cols, id: \.col.id) { entry in
                 let c = entry.fullIndex
                 let cellText = (index < page.text.count && c < page.text[index].count)
@@ -235,31 +338,45 @@ public struct VirtualizedGridView: View {
                     return min(1.0, max(0.0, abs(d) / maxAbs))
                 }()
 
+                let pendingVal: SQLiteValue? = rowID.flatMap { id in
+                    c < page.columns.count ? appVM.edit.pending(table: page.table, rowID: id, column: page.columns[c].name) : nil
+                }
+                if appVM.edit.editingCell?.row == index, appVM.edit.editingCell?.col == c {
+                    EditCellField(
+                        initial: CellCoercion.editorText(for: pendingVal ?? cellVal),
+                        width: entry.width, height: rowHeight, zoom: zoom, palette: palette,
+                        onSubmit: { text, move in submitEdit(page: page, row: index, col: c, text: text, move: move) },
+                        onNull: { submitNull(page: page, row: index, col: c) },
+                        onCancel: { appVM.edit.editingCell = nil; isGridFocused = true }
+                    )
+                } else {
                 CellView(
-                    cell: cellText,
-                    value: cellVal,
+                    cell: pendingVal.map { CellText(text: $0.rawText, truncated: false) } ?? cellText,
+                    value: pendingVal ?? cellVal,
                     column: entry.col,
                     width: entry.width,
                     height: rowHeight,
                     zoom: zoom,
                     palette: palette,
                     wrap: tableVM.wrapCells,
-                    smartText: tableVM.smartFormat ? CellFormat.pretty(value: cellVal, kind: entry.fmt) : nil,
+                    smartText: (tableVM.smartFormat && pendingVal == nil) ? CellFormat.pretty(value: cellVal, kind: entry.fmt) : nil,
                     tone: tableVM.smartFormat ? CellFormat.tone(value: cellVal, kind: entry.fmt) : .neutral,
                     barRatio: ratio,
                     showHighlight: tableVM.cellMatches(row: index, col: c),
                     highlightQuery: tableVM.searchQuery,
                     highlightCaseSensitive: tableVM.searchCaseSensitive,
                     isSelected: isCellSelected,
-                    isActiveMatch: isActiveMatchCell
+                    isActiveMatch: isActiveMatchCell,
+                    isPending: pendingVal != nil,
+                    originalText: pendingVal != nil ? cellVal.rawText : nil
                 )
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { inspect(page: page, row: index, col: c) }
+                .onTapGesture(count: 2) { activate(page: page, row: index, col: c) }
                 .onTapGesture {
                     appVM.selectedRowIndex = index
                     appVM.selectedCell = (row: index, col: c)
                     isGridFocused = true
-                    if NSEvent.modifierFlags.contains(.option), let valStr = cellVal.textValue, !cellVal.isNull {
+                    if NSEvent.modifierFlags.contains(.option), let valStr = cellVal.textValue, !cellVal.isNull, !cellVal.isPartial {
                         let existing = tableVM.filters.first(where: { $0.column == entry.col.name && $0.op == .equals })?.value
                         if existing == valStr {
                             tableVM.setFilter(column: entry.col.name, op: .equals, value: "")
@@ -268,9 +385,10 @@ public struct VirtualizedGridView: View {
                         }
                     }
                 }
+                }
             }
         }
-        .frame(height: rowHeight)
+        .frame(width: width, height: rowHeight, alignment: .leading)
         .background(
             isRowMatched ? palette.matchFill
                 : (isRowSelected ? palette.selectionFill : Color.clear)
@@ -280,16 +398,93 @@ public struct VirtualizedGridView: View {
 
     // MARK: - Skeleton
 
-    private var skeletonRows: some View {
+    private func skeletonRows(_ visCols: [GridCol]) -> some View {
         SkeletonBlock(count: 24,
                       rowHeight: rowHeight,
                       gutterWidth: gutterWidth,
-                      widths: layout.map { $0.width },
-                      totalWidth: contentWidth,
+                      widths: visCols.map { $0.width },
+                      totalWidth: gutterWidth + visCols.reduce(0) { $0 + $1.width },
                       palette: palette)
     }
 
     // MARK: - Helpers
+
+    // MARK: - Editing (docs/BanquetEditStyle.md)
+
+    /// True when the open table and page can take cell edits (rule 4).
+    private var canEditPage: Bool {
+        appVM.edit.isEditing(appVM.activeDocEntry)
+            && appVM.edit.ineligibleReason(table: tableVM.tableName) == nil
+            && !tableVM.isCustomBanquetQuery
+            && tableVM.displayKind != .summary
+    }
+
+    /// Double-click / Return: open the inline editor when editing, else the inspector.
+    private func activate(page: Page, row: Int, col: Int) {
+        guard canEditPage, row < page.rowIDs.count, row < page.rows.count,
+              col < page.columns.count, col < page.rows[row].count,
+              EditViewModel.isCellEditable(column: page.columns[col], value: page.rows[row][col])
+        else { inspect(page: page, row: row, col: col); return }
+        appVM.selectedRowIndex = row
+        appVM.selectedCell = (row: row, col: col)
+        guard page.rows[row][col].isPartial else {
+            appVM.edit.editingCell = (row: row, col: col)
+            return
+        }
+        // The page holds only the head of this value. The editor, and the
+        // original-value check at commit, both need all of it.
+        Task {
+            if await tableVM.resolveFullValues(row: row, cols: [col]) {
+                appVM.edit.editingCell = (row: row, col: col)
+            } else {
+                appVM.errorMessage = "Could not load the full value of this cell to edit it."
+            }
+        }
+    }
+
+    private func submitEdit(page: Page, row: Int, col: Int, text: String, move: EditCellField.Move) -> String? {
+        guard row < page.rowIDs.count else { return "Row has no rowid." }
+        if let err = appVM.edit.stage(table: page.table, rowID: page.rowIDs[row], column: page.columns[col],
+                                      original: page.rows[row][col], text: text) { return err }
+        advance(page: page, row: row, col: col, move: move)
+        return nil
+    }
+
+    private func submitNull(page: Page, row: Int, col: Int) {
+        guard row < page.rowIDs.count else { return }
+        if page.rows[row][col].isPartial {
+            // Staging needs the stored original; fetch it, then come back with the patched page.
+            Task {
+                if await tableVM.resolveFullValues(row: row, cols: [col]), let fresh = tableVM.currentPage,
+                   row < fresh.rows.count, col < fresh.rows[row].count, !fresh.rows[row][col].isPartial {
+                    submitNull(page: fresh, row: row, col: col)
+                } else {
+                    appVM.errorMessage = "Could not load the full value of this cell to edit it."
+                }
+            }
+            return
+        }
+        if let err = appVM.edit.stageNull(table: page.table, rowID: page.rowIDs[row], column: page.columns[col],
+                                          original: page.rows[row][col]) {
+            appVM.errorMessage = err
+            return
+        }
+        advance(page: page, row: row, col: col, move: .none)
+    }
+
+    private func advance(page: Page, row: Int, col: Int, move: EditCellField.Move) {
+        appVM.edit.editingCell = nil
+        isGridFocused = true
+        switch move {
+        case .none: break
+        case .down:
+            let r = min(page.rows.count - 1, row + 1)
+            appVM.selectedCell = (r, col); appVM.selectedRowIndex = r
+        case .right:
+            let vis = layout.map { $0.fullIndex }
+            if let p = vis.firstIndex(of: col) { appVM.selectedCell = (row, vis[min(vis.count - 1, p + 1)]) }
+        }
+    }
 
     private func inspect(page: Page, row: Int, col: Int) {
         guard col < tableVM.columns.count else { return }
@@ -304,6 +499,16 @@ public struct VirtualizedGridView: View {
             value: value,
             rowOrdinal: page.start + Int64(row) + 1
         )
+        if case .textPrefix = value, page.rowKeyed, row < page.rowIDs.count, col < page.columns.count {
+            let doc = tableVM.doc, table = page.table, colName = page.columns[col].name
+            let rowID = page.rowIDs[row]
+            info.loadText = {
+                // No time budget: the user asked for this one value, however long it is.
+                guard let v = doc.cellValues(table: table, columns: [colName], rowID: rowID)?.first else { return nil }
+                if case .text(let s) = v { return s }
+                return v.isNull ? nil : v.rawText
+            }
+        }
         if case .blob = value, row < page.rowIDs.count, page.rowIDs[row] != 0 {
             let doc = tableVM.doc, table = tableVM.tableName, colName = column.name
             let rowID = page.rowIDs[row]
@@ -330,7 +535,12 @@ public struct VirtualizedGridView: View {
            sel.col < tableVM.columns.count, rowIdx < page.rows.count, sel.col < page.rows[rowIdx].count {
             let colName = tableVM.columns[sel.col].name
             let val = page.rows[rowIdx][sel.col]
-            if let valStr = val.textValue, !val.isNull, !val.isBlob {
+            if canEditPage, sel.col < page.columns.count,
+               EditViewModel.isCellEditable(column: page.columns[sel.col], value: val) {
+                Button("Set NULL") { submitNull(page: page, row: rowIdx, col: sel.col) }
+                Divider()
+            }
+            if let valStr = val.textValue, !val.isNull, !val.isBlob, !val.isPartial {
                 Button {
                     tableVM.setFilter(column: colName, op: .equals, value: valStr)
                 } label: {
@@ -436,7 +646,8 @@ public struct VirtualizedGridView: View {
             appVM.paginateLast(tableVM: tableVM); return .handled
         case .space, .return:
             if curRow < page.rows.count, curCol < tableVM.columns.count {
-                inspect(page: page, row: curRow, col: curCol)
+                if press.key == .return { activate(page: page, row: curRow, col: curCol) }
+                else { inspect(page: page, row: curRow, col: curCol) }
             }
             return .handled
         case .escape:
@@ -451,6 +662,10 @@ public struct VirtualizedGridView: View {
             if press.characters == "c", press.modifiers.contains(.command),
                let sel = appVM.selectedCell {
                 tableVM.copyCellValue(rowIdx: sel.row, colIdx: sel.col)
+                return .handled
+            }
+            if press.characters.lowercased() == "z", press.modifiers.contains(.command), appVM.edit.isEditing(appVM.activeDocEntry) {
+                if press.modifiers.contains(.shift) { appVM.edit.redo() } else { appVM.edit.undo() }
                 return .handled
             }
             if press.characters == "v", press.modifiers.contains(.command) {
@@ -473,19 +688,25 @@ enum SQLiteValueFormatBridge {
 
 // MARK: - Grid backdrop (zebra + gridlines in one layer)
 
+/// Zebra stripes, hairlines and column rules for the windowed rows and columns
+/// only. One canvas for the whole table would be over a million points tall on
+/// a 50,000-row page.
 private struct GridBackdrop: View {
+    let firstRow: Int
     let rowCount: Int
     let rowHeight: CGFloat
     let gutterWidth: CGFloat
+    /// Left edges of the windowed columns, measured from the gutter's right edge.
     let columnXs: [CGFloat]
-    let totalWidth: CGFloat
+    /// Right edge of the last windowed column, measured from the row's left edge.
+    let windowEnd: CGFloat
     let rule: Color
     let stripe: Color
 
     var body: some View {
         Canvas { ctx, size in
-            // Zebra: tint odd rows.
-            for i in stride(from: 1, to: rowCount, by: 2) {
+            // Zebra: tint odd rows (by their index in the page, not in the window).
+            for i in 0..<rowCount where (firstRow + i) % 2 == 1 {
                 let rect = CGRect(x: 0, y: CGFloat(i) * rowHeight, width: size.width, height: rowHeight)
                 ctx.fill(Path(rect), with: .color(stripe))
             }
@@ -497,19 +718,28 @@ private struct GridBackdrop: View {
                 h.addLine(to: CGPoint(x: size.width, y: y))
             }
             ctx.stroke(h, with: .color(rule), lineWidth: 0.5)
-            // Vertical column separators.
+            // Vertical separators at the left edge of each windowed column; the
+            // first column's left edge is the gutter rule.
             var v = Path()
-            v.move(to: CGPoint(x: gutterWidth, y: 0))
-            v.addLine(to: CGPoint(x: gutterWidth, y: size.height))
-            for x in columnXs.dropFirst() {
+            for x in columnXs {
                 v.move(to: CGPoint(x: gutterWidth + x, y: 0))
                 v.addLine(to: CGPoint(x: gutterWidth + x, y: size.height))
             }
             ctx.stroke(v, with: .color(rule.opacity(0.95)), lineWidth: 1.0)
         }
-        .frame(width: totalWidth, height: CGFloat(rowCount) * rowHeight)
+        .frame(width: max(0, windowEnd), height: CGFloat(rowCount) * rowHeight)
         .allowsHitTesting(false)
     }
+}
+
+private struct GridScrollYKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+private struct GridScrollXKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 // MARK: - Skeleton
@@ -569,12 +799,15 @@ public struct CellView: View {
     var highlightCaseSensitive: Bool = false
     let isSelected: Bool
     let isActiveMatch: Bool
+    /// Staged, uncommitted edit (edit mode): tinted, with the original in the tooltip.
+    var isPending: Bool = false
+    var originalText: String? = nil
 
     private var trailing: Bool {
         switch value {
         case .integer, .real: return true
         case .null, .blob: return column.isNumeric
-        case .text: return false
+        case .text, .textPrefix: return false
         }
     }
 
@@ -598,7 +831,7 @@ public struct CellView: View {
             }
             .background(
                 isActiveMatch ? palette.activeMatchFill
-                    : (isSelected ? palette.selectionFill : Color.clear)
+                    : (isSelected ? palette.selectionFill : (isPending ? Color.orange.opacity(0.22) : Color.clear))
             )
             .overlay(alignment: .trailing) {
                 Rectangle().fill(palette.rule.opacity(0.65)).frame(width: 1)
@@ -628,6 +861,10 @@ public struct CellView: View {
     }
 
     private var helpText: String {
+        if isPending { return "pending edit · was: \(originalText ?? "")" }
+        if case .textPrefix(_, let total) = value {
+            return "\(total.formatted()) bytes — double-click to inspect"
+        }
         let raw = value.rawText
         if smartText != nil || raw != shownText {
             return "raw: \(raw)"

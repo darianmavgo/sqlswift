@@ -12,6 +12,9 @@ public struct CellInspectInfo: Identifiable, @unchecked Sendable {
     public let rowOrdinal: Int64
     /// For blob cells: how to fetch the actual bytes (rowid known → lazy load).
     public var loadBlob: (() -> Data?)? = nil
+    /// For clipped text cells: how to fetch the whole value (rowid known → lazy
+    /// load). Nil when the page has no row key, so only the prefix is available.
+    public var loadText: (@Sendable () -> String?)? = nil
 
     public init(tableName: String, colName: String, colType: String, value: SQLiteValue, rowOrdinal: Int64) {
         self.tableName = tableName
@@ -159,6 +162,8 @@ public final class AppViewModel: ObservableObject {
             "banquetBarEditing": isBanquetBarEditing,
             "banquetURL": banquetURLString(for: activeTableVM),
             "banquetBarText": banquetBarText,
+            "editing": edit.isEditing(activeDocEntry),
+            "pendingEdits": edit.pendingCount,
             "suggestions": banquetSuggestionsSnapshot,
             "nav": ["back": canNavigateBack, "forward": canNavigateForward, "current": navStack.current ?? ""] as [String: Any],
             "folder": [
@@ -234,9 +239,17 @@ public final class AppViewModel: ObservableObject {
 
     private var isRestoringSession = false
 
+    /// Edit-mode state (docs/BanquetEditStyle.md). Changes are forwarded so views reading it refresh.
+    public let edit = EditViewModel()
+    private var editObserver: AnyCancellable?
+
     public init() {
         self.themeMode = persistence.themeMode
         self.zoomScale = persistence.zoomScale
+        edit.appVM = self
+        editObserver = edit.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
         refreshSession()
         restoreHotReloadSession()
     }
@@ -536,7 +549,14 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
+    /// After an edit commit: every cached table view of the doc re-reads (rule 12).
+    public func reloadTables(docID: String?) {
+        guard let docID else { return }
+        for (key, vm) in tableVMCache where key.hasPrefix("\(docID):") { vm.reloadFromDisk() }
+    }
+
     public func closeDoc(id: String) {
+        if edit.docID == id, !edit.exit() { return } // rule 11: Commit / Discard / Cancel
         let isCurrent = activeDocEntry?.id == id
         session.close(id: id)
         refreshSession()

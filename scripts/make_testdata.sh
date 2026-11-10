@@ -123,5 +123,52 @@ FROM cnt;
 ANALYZE;
 EOF
 
+# Stress fixture for docs/GUIStability.md: the shapes that break database GUIs.
+#   wide       500 columns x 2,000 rows      column virtualisation
+#   bigcells   200 rows of ~2 MB text         cell-size caps, inspector, edit
+#   allrows    60,000 rows                    the "all rows" cap (50,000)
+#   unindexed  2,000,000 rows, no indexes     sort / filter / cancel / time budget
+echo "Generating testdata/stress.db (wide, bigcells, allrows, unindexed)..."
+rm -f testdata/stress.db
+
+wide_cols=""
+wide_vals=""
+for i in $(seq 1 500); do
+    case $((i % 3)) in
+        0) wide_cols="$wide_cols, c$i INTEGER"; wide_vals="$wide_vals, x * $i" ;;
+        1) wide_cols="$wide_cols, c$i REAL";    wide_vals="$wide_vals, round(x * 1.0 / $i, 3)" ;;
+        2) wide_cols="$wide_cols, c$i TEXT";    wide_vals="$wide_vals, 'r' || x || 'c$i'" ;;
+    esac
+done
+
+sqlite3 testdata/stress.db <<EOF
+CREATE TABLE wide (id INTEGER PRIMARY KEY$wide_cols);
+WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 2000)
+INSERT INTO wide SELECT x$wide_vals FROM cnt;
+
+CREATE TABLE bigcells (id INTEGER PRIMARY KEY, title TEXT, body TEXT, doc TEXT);
+WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 200)
+INSERT INTO bigcells
+SELECT x, 'row ' || x,
+       replace(printf('%.*c', 100000, 'x'), 'x', 'lorem ipsum dolor ' || (x % 10) || ' '),
+       '{"id":' || x || ',"tags":["a","b"],"blob":"' || printf('%.*c', 300000, 'j') || '"}'
+FROM cnt;
+
+CREATE TABLE allrows (id INTEGER PRIMARY KEY, name TEXT, qty INTEGER, price REAL, note TEXT, flag INTEGER, ts TEXT, code TEXT);
+WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 60000)
+INSERT INTO allrows
+SELECT x, 'item-' || x, x % 97, round(x * 1.37, 2), 'note for row ' || x, x % 2,
+       strftime('%Y-%m-%d %H:%M:%S', '2026-01-01', '+' || x || ' minutes'), printf('%08x', x * 2654435761 % 4294967296)
+FROM cnt;
+
+CREATE TABLE unindexed (id INTEGER PRIMARY KEY, k INTEGER, label TEXT, amount REAL);
+WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 2000000)
+INSERT INTO unindexed
+SELECT x, abs(random() % 1000000), 'L' || abs(random() % 50000), round(abs(random() % 1000000) / 100.0, 2)
+FROM cnt;
+
+ANALYZE;
+EOF
+
 echo "Done! Test databases created in testdata/"
 ls -lh testdata/

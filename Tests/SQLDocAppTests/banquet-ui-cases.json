@@ -100,6 +100,23 @@
     { "name": "all rows: past the cap the bar shows the slice it really loaded", "steps": ["url {DB}/telemetry[0:100]","allrowscap 5000","url {DB}/telemetry"],
       "expect": { "url": "{DB}/telemetry[0:5000]", "rowsLoaded": 5000, "pageLimit": 5000 } },
 
+    { "name": "edit: entering edit mode leaves the bar URL unchanged", "steps": ["url {DB}/telemetry[0:100]","edit on"],
+      "expect": { "url": "{DB}/telemetry[0:100]", "editing": true, "pendingEdits": 0 } },
+    { "name": "edit: a staged cell edit is pending and the URL is unchanged", "steps": ["url {DB}/telemetry[0:100]","edit on","set 0 temperature 99.5"],
+      "expect": { "url": "{DB}/telemetry[0:100]", "editing": true, "pendingEdits": 1 } },
+    { "name": "edit: a value that does not parse is not staged", "steps": ["url {DB}/telemetry[0:100]","edit on","set 0 device_id abc"],
+      "expect": { "editing": true, "pendingEdits": 0 } },
+    { "name": "edit: NOT NULL columns refuse NULL", "steps": ["url {DB}/telemetry[0:100]","edit on","setnull 0 temperature"],
+      "expect": { "pendingEdits": 0 } },
+    { "name": "edit: undo and redo walk the buffer", "steps": ["url {DB}/telemetry[0:100]","edit on","set 0 temperature 99.5","set 1 humidity 5","undo","redo","undo"],
+      "expect": { "pendingEdits": 1 } },
+    { "name": "edit: revert discards everything", "steps": ["url {DB}/telemetry[0:100]","edit on","set 0 temperature 99.5","set 1 humidity 5","revert"],
+      "expect": { "editing": true, "pendingEdits": 0 } },
+    { "name": "edit: edits survive sorting (keyed by rowid)", "steps": ["url {DB}/telemetry[0:100]","edit on","set 0 temperature 99.5","sort id desc"],
+      "expect": { "url": "{DB}/telemetry/-id[0:100]", "pendingEdits": 1 } },
+    { "name": "edit: sessions never start from a URL", "steps": ["url {DB}/telemetry[0:100]"],
+      "expect": { "editing": false, "pendingEdits": 0 } },
+
     { "name": "bar: deleting the slice while typing waits for Return", "ui": true, "steps": ["url {DB}/telemetry[0:100]","type {DB}/telemetry"],
       "expect": { "bar": "{DB}/telemetry", "url": "{DB}/telemetry[0:100]", "rowsLoaded": 100 } }
   ]

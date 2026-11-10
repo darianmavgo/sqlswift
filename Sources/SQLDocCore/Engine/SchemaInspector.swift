@@ -65,6 +65,18 @@ extension Doc {
         )
     }
 
+    /// The stored values of some cells of one row, whole, fetched by rowid. For
+    /// cells a grid page carries only as `.textPrefix`. Returns nil for
+    /// non-rowid tables, a missing row, or when `control` stops it.
+    public func cellValues(
+        table tableName: String, columns: [String], rowID: Int64, control: QueryControl? = nil
+    ) -> [SQLiteValue]? {
+        guard !columns.isEmpty, let t = table(named: tableName), t.hasRowID else { return nil }
+        let list = columns.map { Doc.quoteIdent($0) }.joined(separator: ", ")
+        let sql = "SELECT \(list) FROM \(Doc.quoteIdent(tableName)) WHERE rowid = ? LIMIT 1"
+        return (try? bg.queryRow(sql, args: [rowID], control: control)) ?? nil
+    }
+
     /// Raw bytes of a BLOB cell, fetched by rowid. Returns nil for non-rowid tables.
     public func blobData(table tableName: String, column: String, rowID: Int64) -> Data? {
         guard let t = table(named: tableName), t.hasRowID else { return nil }
@@ -74,13 +86,13 @@ extension Doc {
 
     // MARK: - Ad-hoc read-only query (the console)
 
-    public static let queryRowCap = 5000
+    public static let queryRowCap = BehaviorConfig.queryRowCap
 
     /// Runs a single read-only statement and returns up to `queryRowCap` rows.
     /// The connection is already `query_only=1`, so writes fail at the engine;
     /// this additionally rejects multi-statement input and obvious DDL/DML up
     /// front for a clearer error.
-    public func runQuery(_ sql: String) throws -> QueryResult {
+    public func runQuery(_ sql: String, control: QueryControl? = nil) throws -> QueryResult {
         let trimmed = sql.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ";"))
         guard !trimmed.isEmpty else {
@@ -101,7 +113,7 @@ extension Doc {
         // PRAGMA/EXPLAIN can't be wrapped in a subquery; run those raw.
         let effective = (firstWord == "PRAGMA" || firstWord == "EXPLAIN") ? trimmed : capped
 
-        let raw = try bg.query(effective)
+        let raw = try bg.query(effective, control: control)
         let names = queryColumnNames(effective, fallbackCount: raw.first?.count ?? 0)
         let truncated = (firstWord != "PRAGMA" && firstWord != "EXPLAIN") && raw.count > Doc.queryRowCap
         let rows = truncated ? Array(raw.prefix(Doc.queryRowCap)) : raw
@@ -110,8 +122,10 @@ extension Doc {
     }
 
     /// Executes a compiled Banquet or SQL query and wraps the result in a `Page` for the main table grid.
-    public func banquetPage(sql: String, table: String, startOffset: Int64 = 0) throws -> Page {
-        let qr = try runQuery(sql)
+    public func banquetPage(
+        sql: String, table: String, startOffset: Int64 = 0, control: QueryControl? = nil
+    ) throws -> Page {
+        let qr = try runQuery(sql, control: (control ?? QueryControl()).forPage(rowKeyed: false))
         let baseCols = (try? columns(for: table)) ?? []
         let cols: [Column] = qr.columns.enumerated().map { idx, name in
             if let existing = baseCols.first(where: { $0.name.lowercased() == name.lowercased() }) {
@@ -126,7 +140,7 @@ extension Doc {
                     inferredType = "REAL"
                 case .blob:
                     inferredType = "BLOB"
-                case .text:
+                case .text, .textPrefix:
                     inferredType = "TEXT"
                 case .null:
                     continue
@@ -270,12 +284,12 @@ extension Doc {
         let qTable = Doc.quoteIdent(tableName)
 
         // Try direct DISTINCT (uses loose index scan on indexed leading columns in SQLite)
-        // with a 100ms budget, falling back to a 5,000-row prefix sample on unindexed huge tables.
+        // under `schema.probe_budget_ms`, falling back to a 5,000-row prefix sample on unindexed huge tables.
         let sqlDirect = "SELECT DISTINCT CAST(\(qCol) AS TEXT) FROM \(qTable) WHERE \(qCol) IS NOT NULL ORDER BY \(qCol) LIMIT 40"
-        let rows = bg.queryWithTimeout(sqlDirect, maxMillis: 100)
+        let rows = bg.queryWithTimeout(sqlDirect, maxMillis: BehaviorConfig.schemaProbeBudgetMs)
             ?? bg.queryWithTimeout(
                 "SELECT DISTINCT CAST(\(qCol) AS TEXT) FROM (SELECT \(qCol) FROM \(qTable) WHERE \(qCol) IS NOT NULL LIMIT 5000) ORDER BY 1 LIMIT 40",
-                maxMillis: 100
+                maxMillis: BehaviorConfig.schemaProbeBudgetMs
             )
         guard let validRows = rows else { return nil }
         let vals = validRows.compactMap { $0.first?.textValue }.filter { !$0.isEmpty }

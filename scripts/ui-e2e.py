@@ -18,7 +18,7 @@ CASES = os.path.join(ROOT, "Tests", "SQLDocAppTests", "banquet-ui-cases.json")
 
 # Per-table view state survives between cases in the live app (the tests use a
 # fresh AppViewModel each time), so put the table back to neutral first.
-RESET = ["blur", "navreset", "allrowscap 0", "showall", "clearfilters", "sort -", "display raw"]
+RESET = ["revert", "edit off", "blur", "navreset", "allrowscap 0", "showall", "clearfilters", "sort -", "display raw"]
 
 
 def read_state():
@@ -72,6 +72,8 @@ def check(case, state, db):
         ("rows loaded", g.get("rowsLoaded"), e.get("rowsLoaded")),
         ("visible columns", g.get("visibleColumns"), e.get("visibleColumns")),
         ("suggestions", [x.replace(db, "{DB}") for x in state.get("suggestions", [])] if "suggestions" in e else None, e.get("suggestions")),
+        ("edit mode", state.get("editing"), e.get("editing")),
+        ("pending edits", state.get("pendingEdits"), e.get("pendingEdits")),
         ("can go back", state.get("nav", {}).get("back"), e.get("navBack")),
         ("can go forward", state.get("nav", {}).get("forward"), e.get("navForward")),
         ("nav current", state.get("nav", {}).get("current", "").replace(db, "{DB}") if "navCurrent" in e else None, e.get("navCurrent")),

@@ -23,12 +23,30 @@ public final class TableViewModel: ObservableObject {
     // Virtualized window state
     @Published public var currentPage: Page? {
         didSet {
+            pageSerial &+= 1
             if let p = currentPage {
                 UILog.event("grid", "page arrived", ["table": tableName, "rows": p.rows.count, "start": p.start, "path": p.path, "micros": p.micros])
             }
         }
     }
     @Published public var currentOffset: Int64 = 0
+
+    /// Bumped on every change to `currentPage`; a cheap identity for caches of
+    /// values derived from the page.
+    public private(set) var pageSerial: UInt64 = 0
+
+    /// Per-page values the grid would otherwise recompute on every render.
+    /// Selecting a cell re-renders the grid, and a scan of a 50,000-row page per
+    /// click is exactly the main-thread work this exists to avoid.
+    private var derivedCache: [String: (serial: UInt64, signature: String, value: Any)] = [:]
+    public func pageDerived<T>(_ name: String, signature: String, _ compute: () -> T) -> T {
+        if let hit = derivedCache[name], hit.serial == pageSerial, hit.signature == signature, let v = hit.value as? T {
+            return v
+        }
+        let v = compute()
+        derivedCache[name] = (pageSerial, signature, v)
+        return v
+    }
 
     // Search / Find state matching sqldoc
     @Published public var searchQuery: String = ""
@@ -166,6 +184,59 @@ public final class TableViewModel: ObservableObject {
     // Every load bumps this; a stale detached result whose generation no longer
     // matches is dropped instead of clobbering a newer page.
     private var loadGeneration: UInt64 = 0
+    // The load in flight. A newer load cancels it, so a superseded query stops
+    // instead of running to completion while the newer one waits on the connection.
+    private var loadToken: CancelToken?
+    /// True once a load has run long enough that the status bar should offer Cancel.
+    @Published public var loadIsSlow = false
+
+    /// Starts a new load: supersedes the previous one and hands back the
+    /// generation and limits the detached query must carry.
+    private func beginLoad() -> (generation: UInt64, control: QueryControl) {
+        loadToken?.cancel()
+        let token = CancelToken()
+        loadToken = token
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        isLoading = true
+        loadIsSlow = false
+        let offerNanos = UInt64(BehaviorConfig.queryCancelOfferMs) * 1_000_000
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: offerNanos)
+            guard let self, generation == self.loadGeneration, self.isLoading else { return }
+            self.loadIsSlow = true
+        }
+        return (generation, QueryControl(
+            budgetMs: BehaviorConfig.queryPageBudgetMs,
+            token: token,
+            maxTextBytes: nil
+        ))
+    }
+
+    /// Common tail of every load. Returns false when a newer load has taken over.
+    private func endLoad(_ generation: UInt64, error: Error? = nil) -> Bool {
+        guard generation == loadGeneration else { return false }
+        isLoading = false
+        isSorting = false
+        loadIsSlow = false
+        if let error {
+            // A user cancel leaves the page as it was; anything else is worth saying.
+            if case SQLiteError.cancelled = error {
+                UILog.event("grid", "load cancelled", ["table": tableName])
+            } else {
+                queryError = error.localizedDescription
+                UILog.event("error", "load failed", ["table": tableName, "error": error.localizedDescription])
+            }
+        }
+        return true
+    }
+
+    /// Stops the load in flight (status-bar Cancel). The current page stays.
+    public func cancelLoad() {
+        guard isLoading else { return }
+        UILog.event("grid", "cancel load", ["table": tableName])
+        loadToken?.cancel()
+    }
     // Column widths are measured once from real data and then left alone (paging
     // must not reflow the grid). Reset explicitly re-measures.
     private var didMeasureFromData = false
@@ -181,6 +252,7 @@ public final class TableViewModel: ObservableObject {
     }
 
     deinit {
+        loadToken?.cancel()
         findTask?.cancel()
         filterCountTask?.cancel()
         watchTask?.cancel()
@@ -191,6 +263,7 @@ public final class TableViewModel: ObservableObject {
 
     /// Called when this VM is evicted from the cache.
     public func dispose() {
+        loadToken?.cancel()
         findTask?.cancel(); findTask = nil
         filterCountTask?.cancel(); filterCountTask = nil
         watchTask?.cancel(); watchTask = nil
@@ -343,9 +416,7 @@ public final class TableViewModel: ObservableObject {
     }
 
     private func runSummaryLoad() {
-        loadGeneration &+= 1
-        let generation = loadGeneration
-        self.isLoading = true
+        let (generation, control) = beginLoad()
         let docRef = doc
         let table = tableName
         let fs = filters
@@ -354,18 +425,23 @@ public final class TableViewModel: ObservableObject {
         let sortNum = sortNumeric
 
         Task.detached(priority: .userInitiated) {
-            let result: Page? = try? docRef.summaryPage(
+            let result = Result { try docRef.summaryPage(
                 for: table,
                 filters: fs,
                 sort: sortCol,
                 desc: desc,
-                sortNumeric: sortNum
-            )
+                sortNumeric: sortNum,
+                control: control
+            ) }
             await MainActor.run { [weak self] in
-                guard let self, generation == self.loadGeneration else { return }
-                self.isLoading = false
-                self.isSorting = false
-                guard let page = result else { return }
+                guard let self else { return }
+                guard case .success(let page) = result else {
+                    if case .failure(let error) = result { _ = self.endLoad(generation, error: error) }
+                    return
+                }
+                guard self.endLoad(generation) else { return }
+                self.currentPageShape = nil
+                self.queryError = nil
                 self.columns = page.columns
                 self.currentPage = page
                 self.currentOffset = 0
@@ -424,7 +500,7 @@ public final class TableViewModel: ObservableObject {
             return
         }
 
-        let window = SQLDocCore.Window(
+        let window = adjacentSeek(to: clampedOffset, limit: limit) ?? SQLDocCore.Window(
             table: tableName,
             limit: limit,
             offset: clampedOffset,
@@ -437,58 +513,76 @@ public final class TableViewModel: ObservableObject {
         runLoad(window)
     }
 
+    /// What a loaded page was a page *of*. Two pages are neighbours only if this matches.
+    private struct LoadShape: Equatable {
+        var sort: String?
+        var desc: Bool
+        var sortNumeric: Bool
+        var filters: [ColumnFilter]
+        var limit: Int
+    }
+    private var currentPageShape: LoadShape?
+
+    /// Every pager action arrives as an offset (the Banquet URL carries the slice).
+    /// When that offset is the page right after or right before the one on screen,
+    /// or the tail of the set, this returns a window that seeks from rows already
+    /// held instead of counting up to the offset. Nil means a genuine jump.
+    private func adjacentSeek(to offset: Int64, limit: Int) -> SQLDocCore.Window? {
+        guard !powerSampleMode, let page = currentPage, page.table == tableName, !page.rows.isEmpty,
+              currentPageShape == LoadShape(sort: sortColumn, desc: isSortDesc, sortNumeric: sortNumeric,
+                                            filters: filters, limit: limit)
+        else { return nil }
+        let count = Int64(page.rows.count)
+
+        if page.rowKeyed {
+            let backward: Bool
+            if offset == page.start + count {
+                backward = false
+            } else if offset > 0, offset == page.start - Int64(limit) {
+                backward = true
+            } else {
+                return tailSeek(to: offset, limit: limit)
+            }
+            guard let anchorRowID = backward ? page.rowIDs.first : page.rowIDs.last else { return nil }
+            var anchorSort: SQLiteValue? = nil
+            if sortColumn != nil {
+                // No usable sort anchor (clipped value): let the offset path handle it.
+                guard let v = sortValue(on: page, last: !backward) else { return nil }
+                anchorSort = v
+            }
+            return SQLDocCore.Window(
+                table: tableName, limit: limit, after: anchorRowID, useAfter: !backward, offset: offset,
+                sort: sortColumn, desc: isSortDesc, sortNumeric: sortNumeric, afterSortValue: anchorSort,
+                filters: filters, backward: backward
+            )
+        }
+
+        // WITHOUT ROWID / composite primary key, unsorted and unfiltered: row-value seek forward.
+        if offset == page.start + count, sortColumn == nil, filters.isEmpty, let pkVals = lastPKValues(on: page) {
+            return SQLDocCore.Window(table: tableName, limit: limit, useAfter: true, offset: offset, afterPKValues: pkVals)
+        }
+        return nil
+    }
+
+    /// The last page, when the total is exact: read the tail directly.
+    private func tailSeek(to offset: Int64, limit: Int) -> SQLDocCore.Window? {
+        let total: Int64? = !filters.isEmpty
+            ? filteredCount
+            : (tableCount.known && tableCount.exact ? tableCount.rows : nil)
+        guard let total, offset > 0, offset == total - Int64(limit) else { return nil }
+        return SQLDocCore.Window(
+            table: tableName, limit: limit, offset: offset,
+            sort: sortColumn, desc: isSortDesc, sortNumeric: sortNumeric,
+            filters: filters, fromEnd: true
+        )
+    }
+
+    // Next, previous and last all go through `loadPage`, which turns a step to a
+    // neighbouring page into a seek (`adjacentSeek`).
+
     public func nextPage() {
-        guard let page = currentPage, !page.rows.isEmpty else { return }
-        let limit = pageLimit
-        let nextOffset = currentOffset + Int64(page.rows.count)
-
-        if powerSampleMode { return }
-        if !filters.isEmpty {
-            loadPage(offset: nextOffset, limit: limit)
-            return
-        }
-
-        self.currentOffset = nextOffset
-
-        if sortColumn == nil, let lastRowID = page.rowIDs.last {
-            // Unsorted sequential scroll: exact O(log n) keyset seek.
-            let window = SQLDocCore.Window(
-                table: tableName,
-                limit: limit,
-                after: lastRowID,
-                useAfter: true,
-                offset: nextOffset
-            )
-            runLoad(window)
-        } else if sortColumn == nil, let pkVals = lastPKValues(on: page) {
-            // WITHOUT ROWID / composite primary key sequential scroll: O(log n) row-value seek.
-            let window = SQLDocCore.Window(
-                table: tableName,
-                limit: limit,
-                useAfter: true,
-                offset: nextOffset,
-                afterPKValues: pkVals
-            )
-            runLoad(window)
-        } else if let sortCol = sortColumn,
-                  let lastRowID = page.rowIDs.last,
-                  let anchorValue = lastSortValue(on: page), !anchorValue.isNull {
-            // Sorted scroll: keyset on (sortValue, rowid) — no deep OFFSET counting.
-            let window = SQLDocCore.Window(
-                table: tableName,
-                limit: limit,
-                after: lastRowID,
-                useAfter: true,
-                offset: nextOffset,
-                sort: sortCol,
-                desc: isSortDesc,
-                sortNumeric: sortNumeric,
-                afterSortValue: anchorValue
-            )
-            runLoad(window)
-        } else {
-            loadPage(offset: nextOffset, limit: limit)
-        }
+        guard let page = currentPage, !page.rows.isEmpty, !powerSampleMode else { return }
+        loadPage(offset: currentOffset + Int64(page.rows.count))
     }
 
     public func previousPage() {
@@ -574,6 +668,12 @@ public final class TableViewModel: ObservableObject {
         }
     }
 
+    /// Dev commands (`UICommands`): scroll a row of the loaded page to the top / open the inspector on a cell.
+    @Published public var scrollRowRequest: Int? = nil
+    public var inspectRequest: (row: Int, column: String)? {
+        didSet { if inspectRequest != nil { objectWillChange.send() } }
+    }
+
     private var pendingSelectRow: Int?
     public func consumePendingSelection() -> Int? {
         defer { pendingSelectRow = nil }
@@ -599,13 +699,15 @@ public final class TableViewModel: ObservableObject {
         loadPage(offset: currentOffset)
     }
 
-    /// The sort-column value of the last row on a page, for keyset anchoring.
-    private func lastSortValue(on page: Page) -> SQLiteValue? {
+    /// The sort-column value of the last (or first) row on a page, for keyset
+    /// anchoring. NULL is a valid anchor; a clipped value is not.
+    private func sortValue(on page: Page, last: Bool) -> SQLiteValue? {
         guard let sortCol = sortColumn,
-              let colIdx = columns.firstIndex(where: { $0.name == sortCol }),
-              let lastRow = page.rows.last,
-              colIdx < lastRow.count else { return nil }
-        return lastRow[colIdx]
+              let colIdx = page.columns.firstIndex(where: { $0.name == sortCol }),
+              let row = last ? page.rows.last : page.rows.first,
+              colIdx < row.count else { return nil }
+        // A clipped value is not the stored value, so it cannot anchor a seek.
+        return row[colIdx].isPartial ? nil : row[colIdx]
     }
 
     /// Primary-key column values (in `pkIndex` order) of the last row on a page,
@@ -628,18 +730,22 @@ public final class TableViewModel: ObservableObject {
     }
 
     private func runLoad(_ window: SQLDocCore.Window) {
-        loadGeneration &+= 1
-        let generation = loadGeneration
-        self.isLoading = true
+        let (generation, control) = beginLoad()
         let docRef = doc
+        let shape = window.powerSample ? nil : LoadShape(
+            sort: window.sort, desc: window.desc, sortNumeric: window.sortNumeric,
+            filters: window.filters, limit: window.limit)
 
         Task.detached(priority: .userInitiated) {
-            let result: Page? = try? docRef.rows(window: window)
+            let result = Result { try docRef.rows(window: window, control: control) }
             await MainActor.run { [weak self] in
-                guard let self, generation == self.loadGeneration else { return }
-                self.isLoading = false
-                self.isSorting = false
-                guard let page = result else { return }
+                guard let self else { return }
+                guard case .success(let page) = result else {
+                    if case .failure(let error) = result { _ = self.endLoad(generation, error: error) }
+                    return
+                }
+                guard self.endLoad(generation) else { return }
+                self.currentPageShape = shape
                 if self.columns != self.rawColumns && self.displayKind != .summary {
                     self.columns = self.rawColumns
                     self.didMeasureFromData = false
@@ -657,9 +763,7 @@ public final class TableViewModel: ObservableObject {
     }
 
     private func runCustomBanquetLoad(offset: Int64, limit: Int) {
-        loadGeneration &+= 1
-        let generation = loadGeneration
-        self.isLoading = true
+        let (generation, control) = beginLoad()
         let docRef = doc
         let table = tableName
 
@@ -700,11 +804,10 @@ public final class TableViewModel: ObservableObject {
 
         Task.detached(priority: .userInitiated) {
             do {
-                let page = try docRef.banquetPage(sql: sql, table: table, startOffset: offset)
+                let page = try docRef.banquetPage(sql: sql, table: table, startOffset: offset, control: control)
                 await MainActor.run { [weak self] in
-                    guard let self, generation == self.loadGeneration else { return }
-                    self.isLoading = false
-                    self.isSorting = false
+                    guard let self, self.endLoad(generation) else { return }
+                    self.currentPageShape = nil
                     self.queryError = nil
                     self.customQueryRowCount = page.rows.count
                     self.columns = page.columns
@@ -718,10 +821,7 @@ public final class TableViewModel: ObservableObject {
                 }
             } catch {
                 await MainActor.run { [weak self] in
-                    guard let self, generation == self.loadGeneration else { return }
-                    self.isLoading = false
-                    self.isSorting = false
-                    self.queryError = error.localizedDescription
+                    _ = self?.endLoad(generation, error: error)
                 }
             }
         }
@@ -965,29 +1065,83 @@ public final class TableViewModel: ObservableObject {
         didMeasureFromData = true
     }
 
+    // MARK: - Full values for clipped cells
+
+    /// Swaps the clipped cells of one row for their stored values, in the current
+    /// page, so whatever reads the page next (editor, copy, staging) sees the real
+    /// thing. `cols` nil means every column. Returns false when a clipped cell
+    /// could not be resolved: the page has no row key, the row is gone, or the
+    /// user paged away meanwhile.
+    @discardableResult
+    public func resolveFullValues(row: Int, cols: [Int]? = nil) async -> Bool {
+        guard let page = currentPage, row >= 0, row < page.rows.count else { return false }
+        let wanted = (cols ?? Array(page.rows[row].indices)).filter {
+            $0 >= 0 && $0 < page.rows[row].count && $0 < page.columns.count && page.rows[row][$0].isPartial
+        }
+        guard !wanted.isEmpty else { return true }
+        guard page.rowKeyed, row < page.rowIDs.count else { return false }
+        let rowID = page.rowIDs[row]
+        let names = wanted.map { page.columns[$0].name }
+        let docRef = doc
+        let table = page.table
+        UILog.event("grid", "fetch full value", ["table": table, "rowid": rowID, "cols": names.joined(separator: ",")])
+        let control = QueryControl(budgetMs: BehaviorConfig.queryPageBudgetMs)
+        let values = await Task.detached(priority: .userInitiated) {
+            docRef.cellValues(table: table, columns: names, rowID: rowID, control: control)
+        }.value
+        guard let values, values.count == wanted.count,
+              var now = currentPage, now.table == table,
+              row < now.rowIDs.count, now.rowIDs[row] == rowID, row < now.rows.count else { return false }
+        for (i, c) in wanted.enumerated() where c < now.rows[row].count { now.rows[row][c] = values[i] }
+        currentPage = now
+        return true
+    }
+
+    /// Runs `body` on the current page once the clipped cells it is about to read
+    /// are whole. Synchronous when nothing is clipped, which is nearly always.
+    private func withFullRow(_ rowIdx: Int, cols: [Int]? = nil, _ body: @escaping @MainActor (Page) -> Void) {
+        guard let page = currentPage, rowIdx >= 0, rowIdx < page.rows.count else { return }
+        let indices = cols ?? Array(page.rows[rowIdx].indices)
+        guard indices.contains(where: { $0 >= 0 && $0 < page.rows[rowIdx].count && page.rows[rowIdx][$0].isPartial }) else {
+            body(page)
+            return
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            // If a value cannot be fetched the copy still goes ahead, with the
+            // clipped cell ending in "…" so the cut is visible.
+            await self.resolveFullValues(row: rowIdx, cols: cols)
+            if let fresh = self.currentPage, rowIdx < fresh.rows.count { body(fresh) }
+        }
+    }
+
     // MARK: - Clipboard & Export Helpers
 
     public func copyCellValue(rowIdx: Int, colIdx: Int) {
-        guard let page = currentPage, rowIdx >= 0, rowIdx < page.rows.count else { return }
-        let row = page.rows[rowIdx]
-        guard colIdx >= 0, colIdx < row.count else { return }
-        let val = row[colIdx]
-        let textToCopy: String
-        switch val {
-        case .null: textToCopy = "NULL"
-        case .integer(let i): textToCopy = "\(i)"
-        case .real(let r): textToCopy = "\(r)"
-        case .text(let s): textToCopy = s
-        case .blob(let bytes): textToCopy = "<BLOB: \(bytes) bytes>"
+        withFullRow(rowIdx, cols: [colIdx]) { page in
+            let row = page.rows[rowIdx]
+            guard colIdx >= 0, colIdx < row.count else { return }
+            let val = row[colIdx]
+            let textToCopy: String
+            switch val {
+            case .null: textToCopy = "NULL"
+            case .integer(let i): textToCopy = "\(i)"
+            case .real(let r): textToCopy = "\(r)"
+            case .text(let s): textToCopy = s
+            case .textPrefix: textToCopy = val.displayText
+            case .blob(let bytes): textToCopy = "<BLOB: \(bytes) bytes>"
+            }
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(textToCopy, forType: .string)
         }
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(textToCopy, forType: .string)
     }
 
     public func copyRowAsJSON(rowIdx: Int) {
-        guard let page = currentPage, rowIdx >= 0, rowIdx < page.rows.count else { return }
-        let row = page.rows[rowIdx]
+        withFullRow(rowIdx) { [weak self] page in self?.copyRowAsJSON(row: page.rows[rowIdx]) }
+    }
+
+    private func copyRowAsJSON(row: [SQLiteValue]) {
         var dict: [String: Any] = [:]
         for (idx, col) in columns.enumerated() where idx < row.count {
             switch row[idx] {
@@ -995,6 +1149,7 @@ public final class TableViewModel: ObservableObject {
             case .integer(let i): dict[col.name] = i
             case .real(let r): dict[col.name] = r
             case .text(let s): dict[col.name] = s
+            case .textPrefix: dict[col.name] = row[idx].displayText
             case .blob(let b): dict[col.name] = "<BLOB \(b) bytes>"
             }
         }
@@ -1007,19 +1162,21 @@ public final class TableViewModel: ObservableObject {
     }
 
     public func copyRowAsTSV(rowIdx: Int) {
-        guard let page = currentPage, rowIdx >= 0, rowIdx < page.rows.count else { return }
-        let tsv = page.rows[rowIdx].map { $0.displayText }.joined(separator: "\t")
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(tsv, forType: .string)
+        withFullRow(rowIdx) { page in
+            let tsv = page.rows[rowIdx].map { $0.displayText }.joined(separator: "\t")
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(tsv, forType: .string)
+        }
     }
 
     public func copyRowAsCSV(rowIdx: Int) {
-        guard let page = currentPage, rowIdx >= 0, rowIdx < page.rows.count else { return }
-        let csv = page.rows[rowIdx].map { $0.csvText }.joined(separator: ",")
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(csv, forType: .string)
+        withFullRow(rowIdx) { page in
+            let csv = page.rows[rowIdx].map { $0.csvText }.joined(separator: ",")
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(csv, forType: .string)
+        }
     }
 
     // MARK: - Streaming Search / Find

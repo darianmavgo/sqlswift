@@ -10,6 +10,12 @@ public enum SQLiteError: LocalizedError {
     case tableNotFound(String)
     case columnNotFound(String)
     case executionFailed(query: String, message: String)
+    /// Stopped by its `CancelToken`.
+    case cancelled
+    /// Stopped by its time budget.
+    case timedOut(millis: Int)
+    /// Stopped because its rows held more text than `query.result_max_bytes`.
+    case resultTooLarge(limitBytes: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -29,6 +35,13 @@ public enum SQLiteError: LocalizedError {
             return "No such column: \(col)"
         case .executionFailed(let query, let message):
             return "SQLite query execution failed for \"\(query)\": \(message)"
+        case .resultTooLarge(let limit):
+            return "Query stopped: its result holds more than \(limit / 1_048_576) MB of text. Select fewer rows or columns."
+        case .cancelled:
+            return "Query cancelled."
+        case .timedOut(let millis):
+            let secs = Double(millis) / 1000
+            return "Query stopped after \(secs.formatted(.number.precision(.fractionLength(0...1)))) s. Narrow it with a filter or a LIMIT."
         }
     }
 }

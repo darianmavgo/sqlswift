@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import Combine
 @testable import SQLDocApp
 @testable import SQLDocCore
 
@@ -24,6 +25,8 @@ struct UICase: Decodable, Sendable, CustomTestStringConvertible {
         var navBack: Bool?
         var navForward: Bool?
         var navCurrent: String?
+        var editing: Bool?
+        var pendingEdits: Int?
     }
     var name: String
     var steps: [String]
@@ -111,6 +114,8 @@ struct BanquetUITests {
         check(g["visibleColumns"] as? [String], e.visibleColumns, "visible columns")
         let nav = s["nav"] as? [String: Any] ?? [:]
         check((s["suggestions"] as? [String]).map { $0.map { $0.replacingOccurrences(of: db, with: "{DB}") } }, e.suggestions, "suggestions")
+        check(s["editing"] as? Bool, e.editing, "edit mode")
+        check(s["pendingEdits"] as? Int, e.pendingEdits, "pending edits")
         check(nav["back"] as? Bool, e.navBack, "can go back")
         check(nav["forward"] as? Bool, e.navForward, "can go forward")
         check((nav["current"] as? String).map { $0.replacingOccurrences(of: db, with: "{DB}") }, e.navCurrent, "nav current")
@@ -123,6 +128,178 @@ struct BanquetUITests {
             await settle(appVM, lifecycle: lifecycle)
             #expect(appVM.uiStateSnapshot()["banquetURL"] as? String == shown, "bar URL is not stable when re-applied")
         }
+    }
+
+    /// Commit path end to end, on a private copy (the shared fixture must stay unwritten).
+    @Test func commitWritesAndReloads() async throws {
+        let path = try makeFixtureDB()
+        let appVM = AppViewModel()
+        var lastSelection = ""
+        func lifecycle() {
+            let now = "\(appVM.activeDocEntry?.id ?? "-"):\(appVM.selectedTableName)"
+            if now != lastSelection { lastSelection = now; appVM.syncActiveTableVM() }
+        }
+        for step in ["url \(path)/telemetry[0:100]", "edit on", "set 0 temperature 77.5", "set 1 device_id 42"] {
+            UICommandRunner.execute(step, appVM: appVM)
+            await settle(appVM, lifecycle: lifecycle)
+        }
+        #expect(appVM.edit.pendingCount == 2)
+        let urlBefore = appVM.banquetURLString(for: appVM.activeTableVM)
+        UICommandRunner.execute("commit", appVM: appVM)
+        await settle(appVM, lifecycle: lifecycle)
+        #expect(appVM.edit.pendingCount == 0)
+        #expect(appVM.errorMessage == nil, "\(appVM.errorMessage ?? "")")
+        #expect(appVM.banquetURLString(for: appVM.activeTableVM) == urlBefore, "commit must not change the URL")
+        // The grid re-read the committed values.
+        let page = appVM.activeTableVM?.currentPage
+        #expect(page?.rows[0][3] == .real(77.5))
+        #expect(page?.rows[1][1] == .integer(42))
+        // And they are really in the file.
+        let check = try SQLiteConnection(path: path)
+        #expect(try check.queryRow("SELECT temperature FROM telemetry WHERE id=1")?.first == .real(77.5))
+        check.close()
+        // Our own write is not an "external change".
+        #expect(appVM.activeTableVM?.fileChangedOnDisk == false)
+        appVM.edit.exit()
+    }
+
+    // MARK: - Big-data behaviour (docs/GUIStability.md)
+
+    private func open(_ url: String) async -> (AppViewModel, () -> Void) {
+        let appVM = AppViewModel()
+        var lastSelection = ""
+        let lifecycle = {
+            let now = "\(appVM.activeDocEntry?.id ?? "-"):\(appVM.selectedTableName)"
+            if now != lastSelection { lastSelection = now; appVM.syncActiveTableVM() }
+        }
+        UICommandRunner.execute("url \(url)", appVM: appVM)
+        await settle(appVM, lifecycle: lifecycle)
+        return (appVM, lifecycle)
+    }
+
+    /// The pager moves by rewriting the URL slice. A step to a neighbouring page
+    /// must still seek from the rows on screen, filtered and sorted included, and
+    /// must show exactly the rows a counted offset would.
+    @Test func pagerStepsSeekInsteadOfCountingOffsets() async throws {
+        // A private copy: view state is remembered per database, and the shared
+        // fixture's cases run in parallel with this.
+        let fixtureDBPath = try makeFixtureDB()
+        let (appVM, lifecycle) = await open("\(fixtureDBPath)/telemetry[0:100]")
+        func run(_ step: String) async {
+            UICommandRunner.execute(step, appVM: appVM)
+            await settle(appVM, lifecycle: lifecycle)
+        }
+        let truthDoc = try Doc.open(path: fixtureDBPath)
+        defer { truthDoc.close() }
+        func check(_ what: String, path: String, sourceLocation: SourceLocation = #_sourceLocation) throws {
+            let vm = try #require(appVM.activeTableVM)
+            let page = try #require(vm.currentPage)
+            #expect(vm.lastQueryPath == path, "\(what): took \(vm.lastQueryPath)", sourceLocation: sourceLocation)
+            // Ground truth by counted offset, straight from the engine.
+            let ids = try truthDoc.fg.query(
+                "SELECT id FROM telemetry"
+                    + (vm.filters.isEmpty ? "" : " WHERE device_id = 2")
+                    + " ORDER BY " + (vm.sortColumn.map { "\($0) \(vm.isSortDesc ? "DESC" : "ASC"), " } ?? "") + "id"
+                    + " LIMIT \(vm.pageLimit) OFFSET \(vm.currentOffset)"
+            ).compactMap { $0.first?.intValue }
+            #expect(page.rowIDs == ids, "\(what): wrong rows at offset \(vm.currentOffset)", sourceLocation: sourceLocation)
+            #expect(page.start == vm.currentOffset, sourceLocation: sourceLocation)
+        }
+
+        await run("page next"); try check("plain next", path: "keyset")
+        await run("page next"); try check("plain next 2", path: "keyset")
+        await run("page prev"); try check("plain prev", path: "keyset")
+
+        await run("filter device_id equals 2")
+        await run("page next"); try check("filtered next", path: "filtered-keyset")
+        await run("page next"); try check("filtered next 2", path: "filtered-keyset")
+        await run("page prev"); try check("filtered prev", path: "filtered-keyset")
+        await run("page prev"); try check("filtered back to first", path: "filtered")
+        await run("page last"); try check("filtered last", path: "filtered-keyset")
+        #expect(appVM.activeTableVM?.currentOffset == 1900)
+        await run("page prev"); try check("filtered prev from last", path: "filtered-keyset")
+
+        await run("sort temperature desc")
+        try check("filtered sorted first", path: "filtered")
+        await run("page next"); try check("filtered sorted next", path: "filtered-keyset")
+        await run("page next"); try check("filtered sorted next 2", path: "filtered-keyset")
+        await run("page prev"); try check("filtered sorted prev", path: "filtered-keyset")
+        await run("page last"); try check("filtered sorted last", path: "filtered-keyset")
+
+        await run("clearfilters")
+        await run("page next"); try check("sorted next", path: "sorted-keyset")
+        await run("page prev"); try check("sorted prev back to first", path: "sorted-offset")
+        // A jump has no neighbour to seek from; it still lands on the right rows.
+        appVM.executeBanquetSlice(offset: 5000, limit: 100, tableVM: try #require(appVM.activeTableVM))
+        await settle(appVM, lifecycle: lifecycle)
+        try check("sorted jump", path: "sorted-offset")
+        await run("page next"); try check("sorted next after jump", path: "sorted-keyset")
+    }
+
+    /// Loads requested in a burst: the earlier ones are cancelled, and only the
+    /// newest page is ever shown.
+    @Test func supersededLoadsNeverLand() async throws {
+        let fixtureDBPath = try makeFixtureDB()
+        let (appVM, lifecycle) = await open("\(fixtureDBPath)/telemetry[0:100]")
+        let vm = try #require(appVM.activeTableVM)
+        var landed: [Int64] = []
+        let watch = vm.$currentPage.sink { if let p = $0 { landed.append(p.start) } }
+        defer { watch.cancel() }
+        landed.removeAll()
+        for off in [1000, 2000, 3000, 4000, 5000] as [Int64] { vm.loadPage(offset: off) }
+        await settle(appVM, lifecycle: lifecycle)
+        #expect(vm.currentPage?.start == 5000)
+        #expect(landed == [5000], "pages that landed: \(landed)")
+        #expect(vm.isLoading == false && vm.loadIsSlow == false)
+        // Cancelling when nothing is loading is a no-op and leaves the page alone.
+        vm.cancelLoad()
+        #expect(vm.currentPage?.start == 5000 && vm.queryError == nil)
+    }
+
+    /// A cell too big for the page arrives clipped; inspecting, copying and
+    /// editing it all work on the stored value.
+    @Test func clippedCellResolvesForEditing() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sqldoc-ui-big-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let path = dir.appendingPathComponent("big.db").path
+        let conn = try SQLiteConnection(path: path, readOnly: false)
+        try conn.exec("CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT, body TEXT)")
+        try conn.exec("INSERT INTO notes VALUES (1, 'long', printf('%.*c', 50000, 'w')), (2, 'short', 'hi')")
+        conn.close()
+
+        let (appVM, lifecycle) = await open("\(path)/notes[0:100]")
+        func run(_ step: String) async {
+            UICommandRunner.execute(step, appVM: appVM)
+            await settle(appVM, lifecycle: lifecycle)
+            try? await Task.sleep(nanoseconds: 150_000_000)   // let a deferred stage finish
+        }
+        let vm = try #require(appVM.activeTableVM)
+        let body = try #require(vm.currentPage?.columns.firstIndex { $0.name == "body" })
+        guard case .textPrefix(let head, let total)? = vm.currentPage?.rows[0][body] else {
+            Issue.record("the 50,000-byte cell should arrive clipped"); return
+        }
+        #expect(total == 50_000 && head.utf8.count == BehaviorConfig.textCellFetchMaxBytes)
+        #expect(vm.currentPage?.rows[1][body] == .text("hi"))
+
+        // Resolving swaps the stored value into the page.
+        #expect(await vm.resolveFullValues(row: 0, cols: [body]))
+        if case .text(let whole)? = vm.currentPage?.rows[0][body] { #expect(whole.utf8.count == 50_000) }
+        else { Issue.record("cell should be whole after resolving") }
+
+        // Edit a clipped cell on a fresh page: staging fetches the original, so the commit matches.
+        vm.loadPage(offset: 0)
+        await settle(appVM, lifecycle: lifecycle)
+        #expect(vm.currentPage?.rows[0][body].isPartial == true)
+        await run("edit on")
+        await run("set 0 body replaced")
+        #expect(appVM.edit.pendingCount == 1)
+        await run("commit")
+        #expect(appVM.errorMessage == nil, "\(appVM.errorMessage ?? "")")
+        #expect(appVM.edit.pendingCount == 0)
+        let check = try SQLiteConnection(path: path)
+        #expect(try check.queryRow("SELECT body FROM notes WHERE id = 1")?.first == .text("replaced"))
+        check.close()
+        appVM.edit.exit()
     }
 
     /// Wait for background page loads to finish (and stay finished briefly).

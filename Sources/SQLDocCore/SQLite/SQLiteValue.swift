@@ -114,10 +114,21 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
     case integer(Int64)
     case real(Double)
     case text(String)
+    /// The leading bytes of a TEXT value too large to carry in a grid page
+    /// (`text.cell_fetch_max_bytes`). Enough to draw the cell; anything that
+    /// needs the real value (inspect, edit, copy, bind) must fetch it with
+    /// `Doc.cellText` first.
+    case textPrefix(String, totalBytes: Int)
     case blob(bytes: Int)
 
     public var isNull: Bool {
         if case .null = self { return true }
+        return false
+    }
+
+    /// True when this holds only part of the stored value.
+    public var isPartial: Bool {
+        if case .textPrefix = self { return true }
         return false
     }
 
@@ -147,6 +158,8 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
         case .integer(let v): return v
         case .real(let v): return v
         case .text(let s): return s
+        // Never a faithful parameter; callers check `isPartial` before binding.
+        case .textPrefix(let s, _): return s
         case .blob: return NSNull()
         }
     }
@@ -154,6 +167,7 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
     public var textValue: String? {
         switch self {
         case .text(let s): return s
+        case .textPrefix(let s, _): return s
         case .integer(let v): return String(v)
         case .real(let v): return String(v)
         case .blob(let b): return "<BLOB: \(b) bytes>"
@@ -175,6 +189,8 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
             return String(v)
         case .text(let s):
             return s
+        case .textPrefix(let s, _):
+            return s + "…"
         case .blob(let count):
             return "<BLOB: \(count) bytes>"
         }
@@ -191,6 +207,8 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
             return String(v)
         case .text(let s):
             return s
+        case .textPrefix(let s, _):
+            return s + "…"
         case .blob(let count):
             return "<BLOB: \(count) bytes>"
         }
@@ -207,6 +225,8 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
             return SQLiteValueFormat.realString(v)
         case .text(let s):
             return s
+        case .textPrefix(let s, _):
+            return s + "…"
         case .blob(let count):
             return "<BLOB: \(count) bytes>"
         }
@@ -237,6 +257,11 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
                 return (s.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).joined(separator: " "), true)
             }
             return (s, false)
+        case .textPrefix(let s, _):
+            // Already cut at the fetch; clamp for display and always flag it.
+            let head = s.count > maxChars ? String(s.prefix(maxChars)) : s
+            let flat = head.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).joined(separator: " ")
+            return (flat + "…", true)
         case .integer, .real, .null:
             return (displayText, false)
         case .blob:
@@ -259,6 +284,9 @@ public enum SQLiteValue: Equatable, Hashable, Sendable, CustomStringConvertible 
                 return "\"\(escaped)\""
             }
             return s
+        case .textPrefix:
+            // Exports read unclipped, so this only guards against misuse.
+            return SQLiteValue.text(displayText).csvText
         case .blob(let count):
             return "[BLOB \(formatBytes(count))]"
         }

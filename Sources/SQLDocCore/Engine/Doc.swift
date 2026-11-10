@@ -83,7 +83,25 @@ public final class Doc: @unchecked Sendable {
     public let modified: Date
     public let options: DocOptions
 
+    /// Quick metadata reads only (PRAGMAs, stat lookups, rowid bounds). The UI
+    /// calls these synchronously, so nothing that can run long may use it: a
+    /// main-thread read would wait on the connection lock behind it.
     public let fg: SQLiteConnection
+
+    // Everything that can run long in the foreground (page loads, summaries,
+    // probes, exports) gets its own connection, opened on first use.
+    private var _pages: SQLiteConnection?
+    public var pages: SQLiteConnection {
+        bgLock.lock()
+        defer { bgLock.unlock() }
+        if let existing = _pages { return existing }
+        if let opened = try? SQLiteConnection(path: path, readOnly: true, immutable: options.isImmutable) {
+            _pages = opened
+            return opened
+        }
+        // Degrade to sharing the metadata connection rather than failing the load.
+        return fg
+    }
 
     // The background connection is only needed once work that isn't first paint
     // starts (exact counts, column sampling, find). Opening it — with its mmap and
@@ -107,6 +125,21 @@ public final class Doc: @unchecked Sendable {
     private var _tables: [Table] = []
     private var _style: Style = .default
     private var lastObservedStamp: String = ""
+    /// O(1) row estimates by table, so a view that shows one per table (the
+    /// sidebar) costs no SQL after the first render.
+    private var estimates: [String: TableCount] = [:]
+
+    func cachedEstimate(for tableName: String) -> TableCount? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return estimates[tableName]
+    }
+
+    func storeEstimate(_ count: TableCount, for tableName: String) {
+        stateLock.lock()
+        estimates[tableName] = count
+        stateLock.unlock()
+    }
 
     /// Computes a lightweight fingerprint of the `.db` and `.db-wal` file modification times and sizes.
     private static func diskStamp(for path: String) -> String {
@@ -138,6 +171,7 @@ public final class Doc: @unchecked Sendable {
         stateLock.lock()
         lastObservedStamp = current
         states.removeAll()
+        estimates.removeAll()
         stateLock.unlock()
         counterWorker.reset()
         try? discover()
@@ -247,6 +281,8 @@ public final class Doc: @unchecked Sendable {
         bgLock.lock()
         _bg?.close()
         _bg = nil
+        _pages?.close()
+        _pages = nil
         bgLock.unlock()
     }
 

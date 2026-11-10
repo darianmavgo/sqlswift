@@ -65,6 +65,7 @@ public struct QueryResult: Sendable {
     public let rows: [[SQLiteValue]]
     public let text: [[CellText]]
     public let truncated: Bool         // more rows existed than the row cap
+    public let hasClippedText: Bool    // some cell holds only the head of its value
     public let micros: Int64
     public let sql: String
 
@@ -74,6 +75,7 @@ public struct QueryResult: Sendable {
         self.truncated = truncated
         self.micros = micros
         self.sql = sql
+        self.hasClippedText = rows.contains { $0.contains { $0.isPartial } }
         self.text = rows.map { row in
             row.map { v in
                 let c = v.gridCell(maxChars: Page.cellTextMaxChars)

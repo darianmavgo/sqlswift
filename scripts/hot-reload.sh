@@ -45,11 +45,15 @@ build_and_stage() {
     fi
 }
 
-SHOULD_OPEN=0
+# Launch the dev app after the first build unless one is already running
+# (it then hot-swaps). --no-open skips this; --open forces a new instance.
+SHOULD_OPEN=auto
 ONCE_ONLY=0
 for arg in "$@"; do
     if [[ "$arg" == "--open" || "$arg" == "-o" ]]; then
         SHOULD_OPEN=1
+    elif [[ "$arg" == "--no-open" ]]; then
+        SHOULD_OPEN=0
     elif [[ "$arg" == "--once" || "$arg" == "-1" ]]; then
         ONCE_ONLY=1
     fi
@@ -57,6 +61,15 @@ done
 
 echo "[hot-reload] Initial build & stage in $REPO_DIR..."
 build_and_stage
+
+if [ "$SHOULD_OPEN" = "auto" ]; then
+    if /usr/bin/pgrep -f "$REPO_DIR/bin/SqlSwift.app/Contents/MacOS/SqlSwift" >/dev/null 2>&1; then
+        echo "[hot-reload] Dev app already running — it will hot-swap."
+        SHOULD_OPEN=0
+    else
+        SHOULD_OPEN=1
+    fi
+fi
 
 if [ "$SHOULD_OPEN" -eq 1 ]; then
     echo "[hot-reload] Opening development instance (open -n bin/SqlSwift.app)..."

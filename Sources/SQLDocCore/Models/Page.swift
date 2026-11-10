@@ -190,10 +190,16 @@ public struct Window: Equatable, Sendable {
     public var forceOffset: Bool
     /// Sort as a number rather than by SQLite's storage-class/text collation.
     public var sortNumeric: Bool
-    /// Keyset anchor for sorted forward paging: the sort-column value of the last
-    /// row on the current page. When present (and non-null) the sorted path seeks
-    /// past `(afterSortValue, after)` instead of counting `OFFSET` rows.
+    /// Keyset anchor for sorted paging: the sort-column value of the anchor row
+    /// (`after` is its rowid). When present the sorted path seeks past
+    /// `(afterSortValue, after)` instead of counting `OFFSET` rows. `.null` is a
+    /// real anchor: it means the anchor row sits in the run of NULL sort values.
     public var afterSortValue: SQLiteValue?
+    /// Seek to the rows just *before* the anchor (`after`, `afterSortValue` are
+    /// then the first row of the current page) instead of just after it.
+    public var backward: Bool
+    /// Read the final `limit` rows of the set, no anchor needed.
+    public var fromEnd: Bool
     /// Keyset anchor for `WITHOUT ROWID` / composite primary key forward paging:
     /// the primary-key column values (in `pkIndex` order) of the last row on the current page.
     public var afterPKValues: [SQLiteValue]
@@ -215,7 +221,9 @@ public struct Window: Equatable, Sendable {
         afterSortValue: SQLiteValue? = nil,
         afterPKValues: [SQLiteValue] = [],
         filters: [ColumnFilter] = [],
-        powerSample: Bool = false
+        powerSample: Bool = false,
+        backward: Bool = false,
+        fromEnd: Bool = false
     ) {
         self.table = table
         self.limit = limit
@@ -230,6 +238,8 @@ public struct Window: Equatable, Sendable {
         self.afterPKValues = afterPKValues
         self.filters = filters
         self.powerSample = powerSample
+        self.backward = backward
+        self.fromEnd = fromEnd
     }
 }
 
@@ -255,6 +265,10 @@ public struct Page: Equatable, Sendable {
     public var rowIDs: [Int64]
     public var start: Int64
     public var approx: Bool
+    /// True when `rowIDs` are real rowids of `table`, so a clipped cell can be
+    /// re-fetched whole with `Doc.cellValues`. False for views, WITHOUT ROWID
+    /// tables and ad-hoc query pages, whose ids are only ordinals.
+    public var rowKeyed: Bool = false
     public var path: String // "keyset", "interpolated", "offset", "sorted-keyset", "sorted-offset"
     public var micros: Int64
 

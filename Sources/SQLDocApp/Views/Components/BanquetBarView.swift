@@ -209,6 +209,10 @@ private struct BanquetAddressField: View {
                 TableTelemetryPillView(tableVM: tableVM)
             }
 
+            if appVM.edit.isEditing(appVM.activeDocEntry) {
+                editBadge
+            }
+
             copyURLButton
 
             if Bundle.main.bundleIdentifier == "com.mavgo.sqlswift.dev" {
@@ -569,6 +573,21 @@ private struct BanquetAddressField: View {
         .buttonStyle(.plain)
         .help("Copy Banquet URL (⌘⌥C)")
         .padding(.trailing, 5)
+    }
+
+    /// Edit mode indicator (docs/BanquetEditStyle.md rule 3). Chrome only; the URL is untouched.
+    private var editBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "pencil").font(.system(size: 8, weight: .bold))
+            Text(appVM.edit.pendingCount > 0 ? "EDIT · \(appVM.edit.pendingCount)" : "EDIT")
+                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(RoundedRectangle(cornerRadius: 3.5).fill(Color.orange))
+        .padding(.trailing, 6)
+        .help("Edit mode — ⌘S commit, ⌥⌘E leave")
     }
 
     private var devBadge: some View {

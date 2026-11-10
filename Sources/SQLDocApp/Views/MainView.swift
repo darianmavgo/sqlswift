@@ -74,6 +74,7 @@ public struct MainView: View {
         .onChange(of: appVM.activeDocEntry?.id) { _, _ in syncActiveTableVM() }
         .sheet(item: $appVM.inspectingCell) { info in
             DataInspectorView(info: info) { appVM.inspectingCell = nil }
+                .id(info.id) // fresh load state per inspected cell
                 .padding()
                 .frame(minWidth: 540, minHeight: 400)
         }

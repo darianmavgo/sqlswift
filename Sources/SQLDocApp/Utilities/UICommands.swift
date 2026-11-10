@@ -18,6 +18,9 @@ import SQLDocCore
 ///   page next|prev|first|last
 ///   size <rows>                    page-size slice at the current offset
 ///   table <name>
+///   cancel                         stop the page load in flight
+///   scroll <row>                   bring a row of the loaded page to the top
+///   inspect <row> <column>         open the cell inspector
 @MainActor
 final class UICommandRunner {
     private var timer: Timer?
@@ -91,6 +94,45 @@ final class UICommandRunner {
             appVM.isBanquetBarEditing = false
         case "table":
             appVM.selectedTableName = rest
+        case "edit":
+            if rest == "off" { appVM.edit.exit() } else if let e = appVM.activeDocEntry { appVM.edit.enter(e) }
+        case "set", "setnull":
+            // set <row> <col> <value…>   (row = 0-based index in the loaded page)
+            let a = rest.split(separator: " ", maxSplits: 2).map(String.init)
+            guard let vm, let page = vm.currentPage, a.count >= 2, let r = Int(a[0]), r < page.rows.count,
+                  let c = page.columns.firstIndex(where: { $0.name == a[1] }), r < page.rowIDs.count else {
+                UILog.event("cmd", "bad set", ["line": line]); return
+            }
+            if page.rows[r][c].isPartial {
+                // Same as the grid: fetch the stored value first, then stage against it.
+                Task { @MainActor in
+                    if await vm.resolveFullValues(row: r, cols: [c]) { execute(line, appVM: appVM) }
+                    else { UILog.event("edit", "stage rejected", ["error": "full value unavailable"]) }
+                }
+                return
+            }
+            let err = verb == "setnull"
+                ? appVM.edit.stageNull(table: page.table, rowID: page.rowIDs[r], column: page.columns[c], original: page.rows[r][c])
+                : appVM.edit.stage(table: page.table, rowID: page.rowIDs[r], column: page.columns[c],
+                                   original: page.rows[r][c], text: a.count > 2 ? a[2] : "")
+            if let err { UILog.event("edit", "stage rejected", ["error": err]) }
+        case "cancel":
+            vm?.cancelLoad()
+        case "scroll":
+            // scroll <row>   (0-based index in the loaded page) — brings that row to the top
+            if let r = Int(rest) { vm?.scrollRowRequest = r }
+        case "inspect":
+            // inspect <row> <col>   opens the cell inspector, as a double-click does outside edit mode
+            let a = rest.split(separator: " ").map(String.init)
+            if let vm, a.count == 2, let r = Int(a[0]) { vm.inspectRequest = (row: r, column: a[1]) }
+        case "commit":
+            appVM.edit.commit()
+        case "revert":
+            appVM.edit.revert()
+        case "undo":
+            appVM.edit.undo()
+        case "redo":
+            appVM.edit.redo()
         case "sort":
             let a = rest.split(separator: " ").map(String.init)
             guard let col = a.first else { return }

@@ -14,6 +14,12 @@ public enum BehaviorConfig {
     public static let colwidthSampleRowsPerAnchor: Int = 12
     /// Longest value string retained per column  [16..4096 chars]
     public static let colwidthSampleTextMaxLen: Int = 256
+    /// Wall-clock budget for a background exact COUNT(*) on a table  [10..600000 ms]
+    public static let countExactBudgetMs: Int = 750
+    /// Wall-clock budget for a background exact COUNT(*) on a view  [10..600000 ms]
+    public static let countExactViewBudgetMs: Int = 350
+    /// Wall-clock budget for counting rows that match the filters  [10..60000 ms]
+    public static let countFilteredBudgetMs: Int = 600
     /// How many polls use the fast interval  [1..100]
     public static let countPollFastIterations: Int = 5
     /// Count re-poll interval, first few tries  [10..5000 ms]
@@ -46,6 +52,10 @@ public enum BehaviorConfig {
     public static let galleryMinTables: Int = 3
     /// Rows rendered per table inside the gallery  [1..10000 rows]
     public static let galleryRowCap: Int = 200
+    /// Largest TEXT value the cell inspector loads without being asked  [4096..… bytes]
+    public static let inspectorTextMaxBytes: Int = 5000000
+    /// Characters of a TEXT value the cell inspector lays out; copy and save still get all of it  [1000..10000000 chars]
+    public static let inspectorTextRenderMaxChars: Int = 200000
     /// Banquet bar URLs remembered for suggestions  [0..5000]
     public static let omniboxHistoryMax: Int = 200
     /// Back/forward entries kept per session  [1..1000]
@@ -56,12 +66,26 @@ public enum BehaviorConfig {
     public static let openDeadlineMs: Int = 60000
     /// Default for the immutable (skip-locking) open promise
     public static let openImmutableDefault: Bool = false
+    /// Loading time after which the status bar offers Cancel  [0..60000 ms]
+    public static let queryCancelOfferMs: Int = 1000
+    /// Wall-clock budget for one query-console statement  [100..… ms]
+    public static let queryConsoleBudgetMs: Int = 30000
+    /// Wall-clock budget for loading one grid page  [100..… ms]
+    public static let queryPageBudgetMs: Int = 15000
+    /// Text bytes one query may bring into memory before it is stopped  [1048576..… bytes]
+    public static let queryResultMaxBytes: Int = 268435456
+    /// Rows an ad-hoc or Banquet SQL query may return  [100..1000000 rows]
+    public static let queryRowCap: Int = 5000
     /// Recent documents listed on the start page  [0..50]
     public static let recentsMaxShown: Int = 8
     /// Recent documents retained  [0..500]
     public static let recentsMaxStored: Int = 20
+    /// Wall-clock budget for the distinct-values probe behind facet hints  [10..10000 ms]
+    public static let schemaProbeBudgetMs: Int = 100
     /// Cell text truncated for display beyond this length  [40..10000 chars]
     public static let textCellDisplayMaxChars: Int = 400
+    /// Bytes of a TEXT cell read into a grid page; longer values load in full only on demand  [256..1048576 bytes]
+    public static let textCellFetchMaxBytes: Int = 4096
     /// Query time at/above which the timing badge turns amber  [0..… us]
     public static let timingSlowThresholdUs: Int = 15000
     /// Colour scheme on first launch, before a theme is picked in the app (a document _style theme still wins under system)
@@ -74,6 +98,10 @@ public enum BehaviorConfig {
     public static let windowDefaultRows: Int = 100
     /// Hard cap on a single rows request  [100..100000 rows]
     public static let windowMaxRows: Int = 1000
+    /// Width of columns rendered to the left and right of the viewport  [0..4000 px]
+    public static let windowOverscanPx: Int = 300
+    /// Rows rendered above/below the viewport  [0..64 rows]
+    public static let windowOverscanRows: Int = 8
     /// Zoom on document open and on reset  [0.1..8 x]
     public static let zoomDefault: Double = 1.0
     /// Maximum zoom multiplier  [1..8 x]

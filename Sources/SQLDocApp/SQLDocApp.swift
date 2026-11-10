@@ -39,6 +39,7 @@ struct SqlSwiftApp: App {
                         }
                     }
                 }
+                .task { AppDelegate.canTerminate = { appVM.edit.exit() } }
                 .onReceive(NotificationCenter.default.publisher(for: .sqldocOpenFileOrFolder)) { note in
                     if let path = note.object as? String {
                         appVM.open(path: path)
@@ -109,6 +110,21 @@ struct SqlSwiftApp: App {
                 }
                 .keyboardShortcut("c", modifiers: [.command, .option])
                 .disabled(appVM.activeDocEntry == nil)
+            }
+
+            CommandMenu("Edit Data") {
+                Button(appVM.edit.isEditing(appVM.activeDocEntry) ? "Leave Edit Mode" : "Enter Edit Mode") {
+                    appVM.edit.toggle()
+                }
+                .keyboardShortcut("e", modifiers: [.command, .option])
+                .disabled(appVM.activeDocEntry == nil)
+
+                Button("Commit Edits") { appVM.edit.commit() }
+                    .keyboardShortcut("s", modifiers: .command)
+                    .disabled(!appVM.edit.isDirty)
+
+                Button("Revert Edits") { appVM.edit.revert() }
+                    .disabled(!appVM.edit.isDirty)
             }
 
             CommandGroup(after: .textEditing) {
@@ -233,6 +249,13 @@ extension SqlSwiftApp {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotReloadTimer: Timer?
     private var initialStampDate: Date?
+
+    /// Set by the app: asks about pending edits (docs/BanquetEditStyle.md rule 11).
+    static var canTerminate: (@MainActor () -> Bool)?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        (Self.canTerminate?() ?? true) ? .terminateNow : .terminateCancel
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         ProcessInfo.processInfo.processName = "SqlSwift"

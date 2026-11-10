@@ -83,6 +83,15 @@ symbol. Paths are under `Sources/` unless noted.
 | Q5 | Auto-Trim on tables over 14 columns; the `summary` display kind (query-style names `summary` but gives no rules for it) | `TableViewModel.swift` :193-195 (14-column check); `SQLDocCore/Banquet/QueryStyle.swift` `summaryPage` :452; display-kind menu items in `SQLDocApp.swift` and `StatusBarView.swift` | runner "QueryStyle: Trim column ordering/hiding, Summary rollup, and View lineage" :671 | Medium | delete the check, `summaryPage`, the menu items, the summary half of that test |
 | Q6 | A URL with no slice means **all rows** (up to `window.all_rows_cap`, 50 000); past the cap the bar shows `[0:cap]`. Page keys move the selection instead of paginating while everything is one page. The engine's per-request clamp now follows the cap (it was a hard 1000, which silently truncated explicit slices such as `[0:5000]`). url-syntax defines no default limit | `TableViewModel`: `showAllRows`, `allRowsCap`, `isShowingAllRows`, `UnslicedPaging`, step 4 of `applyBanquet`; `AppViewModel.banquet(for:)` and `paginate*`; `VirtualizedGridView.handleKeyPress`; `SQLDocCore/Engine/RowReader.swift` `Doc.maxLimit`; `window.all_rows_cap` in `config/seed.sql` | ui cases "plain table (no slice = all rows)" and the `all rows:` group; the bar case "deleting the slice while typing waits for Return" | Medium | delete the state and its three call sites, restore `Doc.maxLimit = 1000`, drop the seed row (`make config generate`), and restore the `[0:100]` default in the cases that were changed |
 
+## E. Edit mode
+
+No upstream standard covers writing. The whole feature is specified in
+[`BanquetEditStyle.md`](BanquetEditStyle.md) (experimental; promote upstream if it holds up).
+
+| ID | Extra | Where | Tests | Diff. | If removed |
+|---|---|---|---|---|---|
+| E1 | Cell editing: opt-in session, staged buffer, commit/revert/undo, `EDIT` badge, ⌥⌘E / ⌘S / ⌘Z | `SQLDocCore/Engine/Editor.swift`; `SQLDocApp/ViewModels/EditViewModel.swift`; `Views/Components/EditCellField.swift`; edit hooks in `VirtualizedGridView.swift`, `StatusBarView.swift`, `BanquetBarView.swift` (`editBadge`), `SQLDocApp.swift` (Edit Data menu, quit guard); `edit-*` rows in `config/seed.sql`; DEBUG verbs in `UICommands.swift` | runner "EditBuffer…", "CellCoercion…", "EditSession…"; ui cases `edit:` and `commitWritesAndReloads` | Medium | delete those files/hooks, the seed rows (`make config generate`), the tests, and restore CLAUDE.md principle 1 |
+
 ---
 
 ## Appendix: standard says it, sqlswift lacks or differs (information only)

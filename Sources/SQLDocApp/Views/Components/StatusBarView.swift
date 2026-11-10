@@ -13,9 +13,29 @@ public struct StatusBarView: View {
 
             pager
 
+            if tableVM.isLoading && tableVM.loadIsSlow {
+                Button("Cancel") { tableVM.cancelLoad() }
+                    .controlSize(.small)
+                    .help("Stop the query that is loading this page")
+            }
+
             if let job = tableVM.backgroundJob {
                 Label(job, systemImage: "hourglass")
                     .font(.system(size: 11)).foregroundColor(.secondary)
+            }
+
+            if appVM.edit.isEditing(appVM.activeDocEntry) {
+                if let why = appVM.edit.ineligibleReason(table: tableVM.tableName) {
+                    Label(why, systemImage: "lock")
+                        .font(.system(size: 11)).foregroundColor(.secondary)
+                } else {
+                    Text(appVM.edit.pendingCount == 0 ? "editing" : "\(appVM.edit.pendingCount) pending")
+                        .font(.system(size: 11, weight: .semibold)).foregroundColor(.orange)
+                    if appVM.edit.isDirty {
+                        Button("Commit") { appVM.edit.commit() }.controlSize(.small)
+                        Button("Revert") { appVM.edit.revert() }.controlSize(.small)
+                    }
+                }
             }
 
             if tableVM.fileChangedOnDisk {

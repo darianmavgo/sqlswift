@@ -9,6 +9,7 @@ final class QueryConsoleModel: ObservableObject {
     @Published var result: QueryResult?
     @Published var error: String?
     @Published var running = false
+    private var token: CancelToken?
 
     init(doc: Doc, seed: String) {
         self.doc = doc
@@ -20,14 +21,39 @@ final class QueryConsoleModel: ObservableObject {
         running = true
         error = nil
         let d = doc
+        let token = CancelToken()
+        self.token = token
+        // Result cells are one-line previews, so long text is cut at the grid's cap.
+        let control = QueryControl(
+            budgetMs: BehaviorConfig.queryConsoleBudgetMs,
+            token: token,
+            maxTextBytes: BehaviorConfig.textCellFetchMaxBytes,
+            maxResultBytes: BehaviorConfig.queryResultMaxBytes
+        )
+        UILog.event("console", "run", ["chars": text.count])
         Task.detached(priority: .userInitiated) { [weak self] in
             do {
-                let r = try d.runQuery(text)
-                await MainActor.run { self?.result = r; self?.error = nil; self?.running = false }
+                let r = try d.runQuery(text, control: control)
+                await MainActor.run {
+                    guard let self, self.token === token else { return }
+                    self.result = r; self.error = nil; self.running = false
+                }
             } catch {
-                await MainActor.run { self?.error = error.localizedDescription; self?.running = false }
+                await MainActor.run {
+                    guard let self, self.token === token else { return }
+                    UILog.event("console", "stopped", ["error": error.localizedDescription])
+                    self.error = error.localizedDescription; self.running = false
+                }
             }
         }
+    }
+
+    /// Stops the statement in flight. The query returns `.cancelled` and the
+    /// previous result, if any, stays on screen.
+    func cancel() {
+        guard running else { return }
+        UILog.event("console", "cancel")
+        token?.cancel()
     }
 }
 
@@ -50,14 +76,24 @@ public struct QueryConsoleView: View {
                 Text("read-only · SELECT / WITH / PRAGMA / EXPLAIN")
                     .font(.system(size: 10)).foregroundColor(.secondary)
                 Spacer()
-                Button {
-                    model.run()
-                } label: {
-                    Label("Run", systemImage: "play.fill").font(.system(size: 12))
+                if model.running {
+                    ProgressView().controlSize(.small)
+                    Button {
+                        model.cancel()
+                    } label: {
+                        Label("Cancel", systemImage: "stop.fill").font(.system(size: 12))
+                    }
+                    .keyboardShortcut(".", modifiers: .command)
+                } else {
+                    Button {
+                        model.run()
+                    } label: {
+                        Label("Run", systemImage: "play.fill").font(.system(size: 12))
+                    }
+                    .keyboardShortcut(.return, modifiers: .command)
                 }
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(model.running)
-                Button("Done", action: onDismiss).keyboardShortcut(.cancelAction)
+                // Closing the console must not leave its query holding the connection.
+                Button("Done") { model.cancel(); onDismiss() }.keyboardShortcut(.cancelAction)
             }
             .padding(10)
             .background(Color(NSColor.controlBackgroundColor))
@@ -102,6 +138,10 @@ public struct QueryConsoleView: View {
             Text("\(r.rows.count) row\(r.rows.count == 1 ? "" : "s")\(r.truncated ? " (capped at \(Doc.queryRowCap))" : "")")
                 .font(.system(size: 11, weight: .medium))
             Text(formatMicros(r.micros)).font(.system(size: 11, design: .monospaced)).foregroundColor(.secondary)
+            if r.hasClippedText {
+                Text("long values cut at \(BehaviorConfig.textCellFetchMaxBytes.formatted()) bytes, marked …")
+                    .font(.system(size: 11)).foregroundColor(.orange)
+            }
             Spacer()
             Button {
                 let tsv = ([r.columns.joined(separator: "\t")] +

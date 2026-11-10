@@ -39,7 +39,7 @@ extension Doc {
         case .csv, .tsv:
             let sep = format == .csv ? "," : "\t"
             var out = cols.map { escapeDelimited($0.name, sep: sep) }.joined(separator: sep) + "\n"
-            try fg.queryStreaming(query) { _, row in
+            try pages.queryStreaming(query) { _, row in
                 out += row.map { format == .csv ? $0.csvText : tsvCell($0) }.joined(separator: sep) + "\n"
                 return true
             }
@@ -47,7 +47,7 @@ extension Doc {
 
         case .json:
             var items: [String] = []
-            try fg.queryStreaming(query) { _, row in
+            try pages.queryStreaming(query) { _, row in
                 var obj: [String] = []
                 for (i, c) in cols.enumerated() where i < row.count {
                     obj.append("\(jsonString(c.name)): \(jsonValue(row[i]))")
@@ -61,7 +61,7 @@ extension Doc {
             let q = Doc.quoteIdent(tableName)
             let colList = cols.map { Doc.quoteIdent($0.name) }.joined(separator: ", ")
             var out = "BEGIN TRANSACTION;\n"
-            try fg.queryStreaming(query) { _, row in
+            try pages.queryStreaming(query) { _, row in
                 let vals = row.map { sqlLiteral($0) }.joined(separator: ", ")
                 out += "INSERT INTO \(q) (\(colList)) VALUES (\(vals));\n"
                 return true
@@ -72,7 +72,7 @@ extension Doc {
         case .markdown:
             var out = "| " + cols.map { mdCell($0.name) }.joined(separator: " | ") + " |\n"
             out += "| " + cols.map { _ in "---" }.joined(separator: " | ") + " |\n"
-            try fg.queryStreaming(query) { _, row in
+            try pages.queryStreaming(query) { _, row in
                 out += "| " + row.map { mdCell($0.displayText) }.joined(separator: " | ") + " |\n"
                 return true
             }
@@ -105,7 +105,7 @@ extension Doc {
 
         var body = "<tr>" + cols.map { "<th>\(htmlEscape($0.name))</th>" }.joined() + "</tr>\n"
         var count = 0
-        try self.fg.queryStreaming("SELECT \(colExpr) FROM \(Doc.quoteIdent(tableName))") { _, row in
+        try self.pages.queryStreaming("SELECT \(colExpr) FROM \(Doc.quoteIdent(tableName))") { _, row in
             count += 1
             body += "<tr>" + row.enumerated().map { i, v in
                 let numeric = i < cols.count && cols[i].isNumeric
@@ -183,6 +183,7 @@ private func jsonValue(_ v: SQLiteValue) -> String {
     case .integer(let i): return "\(i)"
     case .real(let r): return r.isFinite ? "\(r)" : "null"
     case .text(let s): return jsonString(s)
+    case .textPrefix: return jsonString(v.displayText)
     case .blob(let n): return jsonString("<BLOB \(n) bytes>")
     }
 }
@@ -193,6 +194,7 @@ private func sqlLiteral(_ v: SQLiteValue) -> String {
     case .integer(let i): return "\(i)"
     case .real(let r): return r.isFinite ? "\(r)" : "NULL"
     case .text(let s): return "'\(s.replacingOccurrences(of: "'", with: "''"))'"
+    case .textPrefix: return sqlLiteral(.text(v.displayText))
     case .blob(let n): return "'<BLOB \(n) bytes>'"
     }
 }

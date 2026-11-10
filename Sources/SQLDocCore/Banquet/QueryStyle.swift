@@ -372,7 +372,7 @@ extension Doc {
 
         var probe = TableProbe()
         let sql = "SELECT \(selectParts.joined(separator: ", ")) FROM (SELECT * FROM \(ts.quoted) LIMIT \(sampleLimit))"
-        if let row = try? fg.queryRow(sql), !row.isEmpty {
+        if let row = try? pages.queryRow(sql), !row.isEmpty {
             let sampleN = Int(row[0].intValue ?? 0)
             probe.sampleN = sampleN
             for (i, c) in cols.enumerated() {
@@ -418,7 +418,7 @@ extension Doc {
                     "SUM(\(Doc.quoteIdent(pair.0.0.name)) IS NOT \(Doc.quoteIdent(pair.1.0.name))) AS p\(idx)"
                 }
                 let dupSQL = "SELECT \(checkExprs.joined(separator: ", ")) FROM (SELECT * FROM \(ts.quoted) LIMIT \(sampleLimit))"
-                if let dupRow = try? fg.queryRow(dupSQL) {
+                if let dupRow = try? pages.queryRow(dupSQL) {
                     for (idx, pair) in checks.enumerated() where idx < dupRow.count {
                         if (dupRow[idx].intValue ?? 1) == 0 {
                             let loser = QueryStyle.duplicateLoser(pair.0.0, ordA: pair.0.1, pair.1.0, ordB: pair.1.1)
@@ -455,7 +455,8 @@ extension Doc {
         sort: String? = nil,
         desc: Bool = false,
         sortNumeric: Bool = false,
-        limit: Int = 200
+        limit: Int = 200,
+        control: QueryControl? = nil
     ) throws -> Page {
         let startTime = DispatchTime.now()
         touch()
@@ -546,7 +547,7 @@ extension Doc {
         }
 
         let sql = "SELECT \(selectExprs.joined(separator: ", ")) FROM \(sourceExpr)\(groupClause)\(orderClause) LIMIT \(max(1, min(limit, 500)))"
-        let rawRows = try fg.query(sql, args: filterArgs)
+        let rawRows = try pages.query(sql, args: filterArgs, control: (control ?? QueryControl()).forPage(rowKeyed: false))
 
         let elapsedNanos = DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds
         let micros = Int64(elapsedNanos / 1000)

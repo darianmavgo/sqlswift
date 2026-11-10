@@ -43,6 +43,29 @@ enum UILog {
             FileManager.default.createFile(atPath: log.path, contents: nil)
         }
         event("app", "launch", ["version": AppIdentity.version])
+        startHangMonitor()
+    }
+
+    /// Logs `[perf] main thread stalled  ms=…` whenever the main thread goes
+    /// unresponsive for longer than a few frames, so a freeze shows up in
+    /// `ui.log` with a number instead of as an impression.
+    private static let hangThresholdMs = 120.0
+    private static func startHangMonitor() {
+        guard dir != nil else { return }
+        let thread = Thread {
+            let answered = DispatchSemaphore(value: 0)
+            while true {
+                let asked = DispatchTime.now()
+                DispatchQueue.main.async { answered.signal() }
+                answered.wait()
+                let ms = Double(DispatchTime.now().uptimeNanoseconds - asked.uptimeNanoseconds) / 1_000_000
+                if ms > hangThresholdMs { event("perf", "main thread stalled", ["ms": Int(ms)]) }
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+        }
+        thread.name = "sqlswift.hang-monitor"
+        thread.qualityOfService = .userInteractive
+        thread.start()
     }
 
     static func event(_ category: String, _ message: String, _ fields: [String: Any] = [:]) {

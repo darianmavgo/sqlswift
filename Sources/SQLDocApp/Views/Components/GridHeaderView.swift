@@ -6,6 +6,13 @@ public struct GridHeaderView: View {
     var zoomScale: Double
     var gutterWidth: CGFloat
     var palette: GridPalette
+    /// The columns to build header cells for: the grid passes only those near
+    /// the viewport. Nil means every visible column.
+    var columns: [Column]?
+    /// Width of the columns skipped to the left of `columns`.
+    var leadingPad: CGFloat
+    /// Full width of the header row, all columns included.
+    var totalWidth: CGFloat?
 
     @State private var draggingCol: String?
     @State private var dragStartWidth: CGFloat = 0
@@ -15,11 +22,15 @@ public struct GridHeaderView: View {
 
     public init(tableVM: TableViewModel, zoomScale: Double = 1.0,
                 gutterWidth: CGFloat = 60,
-                palette: GridPalette = GridPalette.resolve(dark: false, accent: .accentColor)) {
+                palette: GridPalette = GridPalette.resolve(dark: false, accent: .accentColor),
+                columns: [Column]? = nil, leadingPad: CGFloat = 0, totalWidth: CGFloat? = nil) {
         self.tableVM = tableVM
         self.zoomScale = zoomScale
         self.gutterWidth = gutterWidth
         self.palette = palette
+        self.columns = columns
+        self.leadingPad = leadingPad
+        self.totalWidth = totalWidth
     }
 
     private var zoom: CGFloat { CGFloat(zoomScale) }
@@ -33,11 +44,13 @@ public struct GridHeaderView: View {
                 .padding(.trailing, 8)
                 .frame(width: gutterWidth, height: headerHeight, alignment: .trailing)
 
-            ForEach(tableVM.visibleColumns) { col in
+            if leadingPad > 0 { Color.clear.frame(width: leadingPad, height: headerHeight) }
+
+            ForEach(columns ?? tableVM.visibleColumns) { col in
                 headerCell(col)
             }
         }
-        .frame(height: headerHeight)
+        .frame(width: totalWidth, height: headerHeight, alignment: .leading)
         .background(palette.head)
         .overlay(Rectangle().frame(height: 1).foregroundColor(palette.ruleStrong), alignment: .bottom)
     }

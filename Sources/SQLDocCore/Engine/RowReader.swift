@@ -7,7 +7,7 @@ extension Doc {
     public static let maxLimit = max(BehaviorConfig.windowMaxRows, BehaviorConfig.windowAllRowsCap)
 
     /// Fetches one rendered window of a table according to the window specification.
-    public func rows(window: Window) throws -> Page {
+    public func rows(window: Window, control: QueryControl? = nil) throws -> Page {
         let startTime = DispatchTime.now()
         touch()
         defer { touch() }
@@ -29,6 +29,7 @@ extension Doc {
         let startOffset = offset
         var isApprox = false
         var withRowID = false
+        var reverseRows = false
 
         // Build the filter WHERE fragment once; several paths splice it in.
         var filterClause = ""
@@ -60,8 +61,20 @@ extension Doc {
             args = filterArgs
             path = "power2"
             withRowID = t.hasRowID
+        } else if t.hasRowID, !window.forceOffset,
+                  let seek = Doc.seekQuery(
+                      window: window, quotedTable: ts.quoted, colExpr: colExpr,
+                      filterClause: filterClause, filterArgs: filterArgs, limit: limit) {
+            // Anchored on a row we already hold: O(log n) however deep the page,
+            // with or without filters and sort, forward or back.
+            query = seek.sql
+            args = seek.args
+            path = seek.path
+            withRowID = true
+            reverseRows = window.backward || window.fromEnd
         } else if !filterClause.isEmpty {
-            // Filtered browsing: offset paging over the filtered set (optionally sorted).
+            // Filtered jump to an arbitrary ordinal: no row to anchor on, so count
+            // past `OFFSET` rows of the filtered set (optionally sorted).
             let sel = t.hasRowID ? "rowid, \(colExpr)" : colExpr
             var order = "ORDER BY \(t.hasRowID ? "rowid" : "1")"
             if let sc = window.sort, !sc.isEmpty {
@@ -80,24 +93,10 @@ extension Doc {
             // rowid always ascending: a deterministic total order so equal keys
             // never reshuffle between pages.
             if t.hasRowID {
-                let keysetAnchor = window.afterSortValue.flatMap { $0.isNull ? nil : $0 }
-                if window.useAfter, let anchor = keysetAnchor {
-                    let cmp = window.desc ? "<" : ">"
-                    let anchorBind: Any = window.sortNumeric
-                        ? (anchor.doubleValue ?? Double(anchor.textValue ?? "") ?? 0)
-                        : anchor.bindable
-                    query = """
-                        SELECT rowid, \(colExpr) FROM \(ts.quoted) \
-                        WHERE \(sortExpr) \(cmp) ? OR (\(sortExpr) = ? AND rowid > ?) \
-                        ORDER BY \(sortExpr) \(dir), rowid ASC LIMIT ?
-                        """
-                    args = [anchorBind, anchorBind, window.after, limit]
-                    path = "sorted-keyset"
-                } else {
-                    query = "SELECT rowid, \(colExpr) FROM \(ts.quoted) ORDER BY \(sortExpr) \(dir), rowid ASC LIMIT ? OFFSET ?"
-                    args = [limit, offset]
-                    path = "sorted-offset"
-                }
+                // No usable anchor (a jump, or a clipped sort value): count rows.
+                query = "SELECT rowid, \(colExpr) FROM \(ts.quoted) ORDER BY \(sortExpr) \(dir), rowid ASC LIMIT ? OFFSET ?"
+                args = [limit, offset]
+                path = "sorted-offset"
                 withRowID = true
             } else {
                 query = "SELECT \(colExpr) FROM \(ts.quoted) ORDER BY \(sortExpr) \(dir) LIMIT ? OFFSET ?"
@@ -108,12 +107,6 @@ extension Doc {
             query = "SELECT \(colExpr) FROM \(ts.quoted) LIMIT ? OFFSET ?"
             args = [limit, offset]
             path = "offset"
-        } else if t.hasRowID && window.useAfter {
-            // Sequential scrolling: exact and O(log n) index seek
-            query = "SELECT rowid, \(colExpr) FROM \(ts.quoted) WHERE rowid > ? ORDER BY rowid LIMIT ?"
-            args = [window.after, limit]
-            path = "keyset"
-            withRowID = true
         } else if t.hasRowID {
             // Scrollbar jump: interpolate ordinal onto rowid axis
             let (rid, exact) = rowidForOffset(table: window.table, offset: offset)
@@ -155,7 +148,20 @@ extension Doc {
             }
         }
 
-        let rawRows = try fg.query(query, args: args)
+        var rawRows = try pages.query(query, args: args, control: (control ?? QueryControl()).forPage(rowKeyed: withRowID))
+        if reverseRows {
+            // A backward seek that comes up short has run into the start of the
+            // set, so the page the caller wants is simply the first one.
+            if window.backward && rawRows.count < limit {
+                var first = window
+                first.backward = false
+                first.useAfter = false
+                first.afterSortValue = nil
+                first.offset = 0
+                return try rows(window: first, control: control)
+            }
+            rawRows.reverse()
+        }
         var rowValues: [[SQLiteValue]] = []
         var rowIDs: [Int64] = []
         rowValues.reserveCapacity(rawRows.count)
@@ -186,7 +192,7 @@ extension Doc {
         let elapsedNanos = DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds
         let micros = Int64(elapsedNanos / 1000)
 
-        return Page(
+        var page = Page(
             table: window.table,
             columns: cols,
             rows: rowValues,
@@ -197,6 +203,71 @@ extension Doc {
             path: path,
             micros: micros
         )
+        page.rowKeyed = withRowID
+        return page
+    }
+
+    /// SQL for a rowid-anchored seek, or nil when the window names no anchor this
+    /// can use (then the caller falls back to an offset path).
+    ///
+    /// Row order is `(sort expr, rowid ASC)`, or plain `rowid` when unsorted.
+    /// Reading backward or from the end walks that order in reverse and the
+    /// caller flips the rows. NULL sort values need their own arms: they sort
+    /// lowest, and no comparison against a bound value ever matches them.
+    static func seekQuery(
+        window: Window, quotedTable: String, colExpr: String,
+        filterClause: String, filterArgs: [Any], limit: Int
+    ) -> (sql: String, args: [Any], path: String)? {
+        guard window.useAfter || window.backward || window.fromEnd else { return nil }
+        let reversed = window.backward || window.fromEnd
+        let ridCmp = reversed ? "<" : ">"
+        let sortCol = window.sort.flatMap { $0.isEmpty ? nil : $0 }
+
+        var conds: [String] = []
+        var args: [Any] = []
+        if !filterClause.isEmpty {
+            conds.append("(\(filterClause))")
+            args += filterArgs
+        }
+
+        let order: String
+        if let sortCol {
+            let q = Doc.quoteIdent(sortCol)
+            let se = window.sortNumeric ? "CAST(\(q) AS REAL)" : q
+            // The direction this query walks the sort values in.
+            let walkDesc = window.desc != reversed
+            order = "\(se) \(walkDesc ? "DESC" : "ASC"), rowid \(reversed ? "DESC" : "ASC")"
+            if !window.fromEnd {
+                guard let anchor = window.afterSortValue, !anchor.isPartial else { return nil }
+                if anchor.isNull {
+                    // Walking up, every non-NULL row is still ahead; walking down, none is.
+                    conds.append(walkDesc
+                        ? "(\(se) IS NULL AND rowid \(ridCmp) ?)"
+                        : "((\(se) IS NULL AND rowid \(ridCmp) ?) OR \(se) IS NOT NULL)")
+                    args.append(window.after)
+                } else {
+                    let bind: Any = window.sortNumeric
+                        ? (anchor.doubleValue ?? Double(anchor.textValue ?? "") ?? 0)
+                        : anchor.bindable
+                    let cmp = walkDesc ? "<" : ">"
+                    // Walking down, the NULL run lies ahead of every value.
+                    let nullTail = walkDesc ? " OR \(se) IS NULL" : ""
+                    conds.append("(\(se) \(cmp) ? OR (\(se) = ? AND rowid \(ridCmp) ?)\(nullTail))")
+                    args += [bind, bind, window.after]
+                }
+            }
+        } else {
+            order = "rowid \(reversed ? "DESC" : "ASC")"
+            if !window.fromEnd {
+                conds.append("rowid \(ridCmp) ?")
+                args.append(window.after)
+            }
+        }
+
+        let whereSQL = conds.isEmpty ? "" : " WHERE " + conds.joined(separator: " AND ")
+        args.append(limit)
+        let path = !filterClause.isEmpty ? "filtered-keyset" : (sortCol != nil ? "sorted-keyset" : "keyset")
+        return ("SELECT rowid, \(colExpr) FROM \(quotedTable)\(whereSQL) ORDER BY \(order) LIMIT ?", args, path)
     }
 
     /// Translates an ordinal offset into an approximate or exact rowid.

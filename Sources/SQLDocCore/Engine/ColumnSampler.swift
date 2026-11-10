@@ -100,7 +100,9 @@ extension Doc {
                 anchor = lo
             }
 
-            if let rows = try? bg.query(q, args: [anchor, Doc.sampleRowsPerAnchor]) {
+            // Only the head of each value can matter for a column width.
+            let control = QueryControl(maxTextBytes: BehaviorConfig.colwidthSampleTextMaxLen * 4)
+            if let rows = try? bg.query(q, args: [anchor, Doc.sampleRowsPerAnchor], control: control) {
                 for row in rows {
                     for (colIdx, val) in row.prefix(cols.count).enumerated() {
                         let sample = sampleText(val)
@@ -117,14 +119,14 @@ extension Doc {
     }
 
     private func sampleText(_ val: SQLiteValue) -> String {
-        let maxLen = 256
+        let maxLen = BehaviorConfig.colwidthSampleTextMaxLen
         let text: String
         switch val {
         case .null:
             text = "NULL"
         case .blob:
             text = "◼ 000 KB"
-        case .text(let s):
+        case .text(let s), .textPrefix(let s, _):
             text = s
         case .integer(let v):
             text = SQLiteValueFormat.integerString(v)

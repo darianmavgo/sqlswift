@@ -76,6 +76,13 @@ extension Doc {
 
     /// Returns the same O(1) estimate that count() does, but never starts a background exact count.
     public func estimateRows(for tableName: String) -> TableCount {
+        if let cached = cachedEstimate(for: tableName) { return cached }
+        let estimate = computeEstimate(for: tableName)
+        storeEstimate(estimate, for: tableName)
+        return estimate
+    }
+
+    private func computeEstimate(for tableName: String) -> TableCount {
         // 1. Try sqlite_stat1 (if ANALYZE was run on the database)
         if let statCount = statEstimate(for: tableName) {
             return TableCount(rows: statCount, exact: false, known: true)
@@ -126,7 +133,7 @@ extension Doc {
         }
         guard !clauses.isEmpty else { return nil }
         let sql = "SELECT COUNT(*) FROM \(Doc.quoteIdent(tableName)) WHERE \(clauses.joined(separator: " AND "))"
-        return bg.queryRowWithTimeout(sql, args: args, maxMillis: 600)?.first?.intValue
+        return bg.queryRowWithTimeout(sql, args: args, maxMillis: BehaviorConfig.countFilteredBudgetMs)?.first?.intValue
     }
 
     private func runExactCount(for tableName: String) async {
@@ -137,7 +144,7 @@ extension Doc {
         // Bound background COUNT(*) time so 20 GB tables (which already have an O(1)
         // rowid-bounds estimate) and expensive multi-stage window-function views never
         // thrash disk or CPU in the background.
-        let budgetMs = t.isView ? 350 : 750
+        let budgetMs = t.isView ? BehaviorConfig.countExactViewBudgetMs : BehaviorConfig.countExactBudgetMs
         let q = "SELECT COUNT(*) FROM \(Doc.quoteIdent(tableName))"
         guard let row = bg.queryRowWithTimeout(q, maxMillis: budgetMs),
               let countVal = row.first?.intValue else {

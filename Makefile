@@ -137,7 +137,7 @@ uninstall:
 	@echo "removed $(INSTALL_DIR)/sqldoc and $(APPS_DIR)/$(APP_NAME).app (Launch Services rebuilt)"
 
 bench: release
-	@swift run sqldoc bench testdata/sample.db
+	@$(SWIFT) run $(SWIFT_FLAGS) -c release sqlswift bench testdata/sample.db
 
 watch hot:
 	@sh scripts/hot-reload.sh

@@ -9,6 +9,10 @@ public struct DataInspectorView: View {
     @State private var isPrettyJSON: Bool = true
     @State private var wrapLines: Bool = true
     @State private var copiedNotice: Bool = false
+    // A clipped text cell's whole value, once fetched.
+    @State private var fullText: String?
+    @State private var textLoading = false
+    @State private var textLoadFailed = false
 
     public init(info: CellInspectInfo, onDismiss: @escaping () -> Void) {
         self.info = info
@@ -83,6 +87,9 @@ public struct DataInspectorView: View {
                     case .text(let s):
                         textInspectorView(s)
 
+                    case .textPrefix(let head, let total):
+                        clippedTextInspectorView(head: head, total: total)
+
                     case .blob(let bytes):
                         blobInspectorView(byteCount: bytes)
                     }
@@ -101,8 +108,112 @@ public struct DataInspectorView: View {
         .shadow(color: Color.black.opacity(0.25), radius: 16, x: 0, y: 8)
     }
 
+    // MARK: - Clipped Text Inspector
+
+    /// A text cell the grid page holds only the head of. Small enough values load
+    /// by themselves; larger ones wait to be asked for.
+    @ViewBuilder
+    private func clippedTextInspectorView(head: String, total: Int) -> some View {
+        if let full = fullText {
+            textInspectorView(full)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text("\(formatBytes(total)) of text · showing the first \(formatBytes(head.utf8.count))")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    if info.loadText != nil {
+                        if textLoading { ProgressView().controlSize(.small) }
+                        Button("Load all") { loadFullText() }.disabled(textLoading)
+                        Button("Save…") { saveFullText() }.disabled(textLoading)
+                    }
+                }
+                if info.loadText == nil {
+                    Text("This result has no row key, so the rest of the value can't be fetched from here. Select the column in the query console to see all of it.")
+                        .font(.system(size: 11)).foregroundColor(.secondary)
+                }
+                if textLoadFailed {
+                    Text("Couldn't load the full value.")
+                        .font(.system(size: 11)).foregroundColor(.orange)
+                }
+                Text(head + "…")
+                    .font(.system(size: 12))
+                    .foregroundColor(.primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                    .cornerRadius(6)
+            }
+            .task {
+                if total <= BehaviorConfig.inspectorTextMaxBytes { loadFullText() }
+            }
+        }
+    }
+
+    private func loadFullText() {
+        guard let load = info.loadText, !textLoading else { return }
+        textLoading = true
+        textLoadFailed = false
+        UILog.event("inspector", "load full text", ["col": info.colName, "row": info.rowOrdinal])
+        Task {
+            let loaded = await Task.detached(priority: .userInitiated) { load() }.value
+            textLoading = false
+            if let loaded { fullText = loaded } else { textLoadFailed = true }
+        }
+    }
+
+    private func saveFullText() {
+        guard let load = info.loadText else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(info.colName)_row\(info.rowOrdinal).txt"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let have = fullText
+        textLoading = true
+        Task {
+            // Written off the main thread: this path exists for values too big to show.
+            let ok = await Task.detached(priority: .userInitiated) { () -> Bool in
+                guard let text = have ?? load() else { return false }
+                return (try? text.write(to: url, atomically: true, encoding: .utf8)) != nil
+            }.value
+            textLoading = false
+            textLoadFailed = !ok
+        }
+    }
+
     // MARK: - Text Inspector
+    @ViewBuilder
     private func textInspectorView(_ text: String) -> some View {
+        // `utf8.count` is O(1) and never smaller than the character count, so this
+        // keeps very large values away from the per-render work below.
+        if text.utf8.count > BehaviorConfig.inspectorTextRenderMaxChars {
+            largeTextInspectorView(text)
+        } else {
+            smallTextInspectorView(text)
+        }
+    }
+
+    /// A value too long to lay out whole: no JSON parsing, no character or line
+    /// counts, and only its head on screen. Copy and Save still carry all of it.
+    private func largeTextInspectorView(_ text: String) -> some View {
+        let shown = String(text.prefix(BehaviorConfig.inspectorTextRenderMaxChars))
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("\(formatBytes(text.utf8.count)) of text · showing the first \(BehaviorConfig.inspectorTextRenderMaxChars.formatted()) characters · Copy takes all of it")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(.secondary)
+            Text(shown + "…")
+                .font(.system(size: 12))
+                .foregroundColor(.primary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                .cornerRadius(6)
+        }
+    }
+
+    private func smallTextInspectorView(_ text: String) -> some View {
         let isJSON = isValidJSON(text)
         let formattedText = (isJSON && isPrettyJSON) ? prettyPrintJSON(text) : text
         let jsonPairs = isJSON ? parseJSONPairs(text) : []
@@ -387,12 +498,26 @@ public struct DataInspectorView: View {
     }
 
     private func copyToClipboard() {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(info.value.displayText, forType: .string)
-        copiedNotice = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            copiedNotice = false
+        func put(_ text: String) {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(text, forType: .string)
+            copiedNotice = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                copiedNotice = false
+            }
+        }
+        // A clipped cell copies its stored value, fetching it first if need be.
+        guard info.value.isPartial, fullText == nil, let load = info.loadText else {
+            put(fullText ?? info.value.displayText)
+            return
+        }
+        textLoading = true
+        Task {
+            let loaded = await Task.detached(priority: .userInitiated) { load() }.value
+            textLoading = false
+            if let loaded { fullText = loaded }
+            put(loaded ?? info.value.displayText)
         }
     }
 
