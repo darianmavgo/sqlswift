@@ -425,6 +425,9 @@ func runAllTests() async {
         expectEqual(bBare2.whereClause, "temperature<20 AND device_id = 3 AND id>6000")
         expectEqual(bBare2.limit, 5)
         expectEqual(try BanquetParser.parse("t.db/telemetry?id>6000").whereClause, "id>6000")
+        // `display` is not a reserved key: only `display=summary` is a view mode.
+        expectEqual(try BanquetParser.parse("t.db/telemetry?display=trim").whereClause, "display = 'trim'")
+        expectEqual(try BanquetParser.parse("t.db/telemetry?display=summary").whereClause, nil)
         // Comparison in the path: filters, and a marker keeps just the column name.
         let bCmp = try BanquetParser.parse("t.db/telemetry/+id>6000,temperature,humidity[0:100]")
         expectEqual(bCmp.sortColumn, "id")

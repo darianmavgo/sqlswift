@@ -256,6 +256,40 @@ struct BanquetUITests {
         #expect(vm.currentPage?.start == 5000 && vm.queryError == nil)
     }
 
+    /// A wide table opens in Trim by itself. That is the app's choice of how to draw
+    /// the rows, so it must not write itself into the URL, on open or on a page turn.
+    @Test func trimNeverEntersTheURL() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sqldoc-ui-wide-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let path = dir.appendingPathComponent("wide.db").path
+        let conn = try SQLiteConnection(path: path, readOnly: false)
+        let cols = (1...20).map { "c\($0) INTEGER" }.joined(separator: ", ")
+        try conn.exec("CREATE TABLE wide (id INTEGER PRIMARY KEY, \(cols))")
+        try conn.exec("BEGIN")
+        for i in 1...300 {
+            try conn.exec("INSERT INTO wide VALUES (\(i), \((1...20).map { "\(i * $0)" }.joined(separator: ", ")))")
+        }
+        try conn.exec("COMMIT")
+        conn.close()
+
+        let (appVM, lifecycle) = await open("\(path)/wide")
+        let vm = try #require(appVM.activeTableVM)
+        #expect(vm.displayKind == .trim, "a 21-column table should open in Trim")
+        #expect(appVM.banquetURLString(for: vm) == "\(path)/wide")
+
+        for step in ["size 100", "page next", "sort c3 desc"] {
+            UICommandRunner.execute(step, appVM: appVM)
+            await settle(appVM, lifecycle: lifecycle)
+            #expect(vm.displayKind == .trim, "\(step) must not leave Trim")
+            #expect(!appVM.banquetURLString(for: vm).contains("display"), "after \(step): \(appVM.banquetURLString(for: vm))")
+        }
+
+        // Summary is a different result set, so it is the one display kind the URL names.
+        UICommandRunner.execute("display summary", appVM: appVM)
+        await settle(appVM, lifecycle: lifecycle)
+        #expect(appVM.banquetURLString(for: vm).hasSuffix("?display=summary"))
+    }
+
     /// A cell too big for the page arrives clipped; inspecting, copying and
     /// editing it all work on the stored value.
     @Test func clippedCellResolvesForEditing() async throws {

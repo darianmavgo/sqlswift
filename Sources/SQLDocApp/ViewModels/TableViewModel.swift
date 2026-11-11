@@ -165,7 +165,7 @@ public final class TableViewModel: ObservableObject {
         guard displayKind != .summary else { return [] }
         let shown = visibleColumns.map(\.name)
         if shown.isEmpty { return [] }
-        // Trim is written as `display=trim`; `*` then stands for its smart ordering.
+        // Trim leaves no mark in the URL; `*` then stands for its smart ordering.
         if displayKind == .trim && hiddenColumns.isEmpty {
             let prefix = columnOrderPrefix
             return prefix.isEmpty || prefix.count == shown.count ? [] : prefix + ["*"]
@@ -982,12 +982,9 @@ public final class TableViewModel: ObservableObject {
         }
     }
 
-    /// `display=trim|summary|raw` from the extra query params.
+    /// `display=summary` from the extra query params: the only display kind a URL can name.
     static func displayKind(in params: [String]) -> DisplayKind? {
-        for p in params where p.lowercased().hasPrefix("display=") {
-            return DisplayKind(rawValue: String(p.dropFirst("display=".count)).lowercased())
-        }
-        return nil
+        params.contains { $0.lowercased() == "display=summary" } ? .summary : nil
     }
 
     // MARK: - Column widths

@@ -570,7 +570,7 @@ public enum BanquetParser {
     /// A non-reserved `?` param is a condition only if it has a comparison operator.
     private static func isCondition(_ param: String) -> Bool {
         let p = (param.removingPercentEncoding ?? param).lowercased()
-        if p.hasPrefix("display=") { return false }   // view mode, not a filter
+        if p == "display=summary" { return false }   // view mode, not a filter
         return p.contains("=") || p.contains("<") || p.contains(">")
             || p.contains(" like ") || p.contains(" in ") || p.contains(" is ") || p.contains(" between ")
     }

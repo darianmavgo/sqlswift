@@ -749,15 +749,10 @@ public final class AppViewModel: ObservableObject {
         var extraParams = (tableVM?.extraQueryParams.isEmpty == false)
             ? (tableVM?.extraQueryParams ?? [])
             : self.extraQueryParams
-        // The display mode is part of the view, so it travels in the URL: a bookmark or
-        // pasted link reopens in Trim/Summary rather than whatever the table defaults to.
+        // Summary changes what the rows are (a rollup), so the URL says so. Trim and raw
+        // are two ways of drawing the same rows and never appear in the URL.
         extraParams.removeAll { $0.lowercased().hasPrefix("display=") }
-        if let tableVM, tableVM.displayKind != .raw {
-            let explicitList = !selectCols.contains("*") && selectCols != ["*"]
-            if tableVM.displayKind == .summary || !explicitList {
-                extraParams.append("display=\(tableVM.displayKind.rawValue)")
-            }
-        }
+        if tableVM?.displayKind == .summary { extraParams.append("display=summary") }
 
         return Banquet(
             dataSetPath: dataset,
