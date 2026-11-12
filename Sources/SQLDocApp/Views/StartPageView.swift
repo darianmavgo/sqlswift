@@ -10,8 +10,6 @@ public struct StartPageView: View {
     @State private var expandedFilePaths: Set<String> = []
     @State private var previewTableByPath: [String: String] = [:]
 
-    public typealias SortOrder = FolderSortOrder
-
     private var displayedFiles: [SQLiteFileEntry] {
         let q = appVM.folderSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let base = appVM.folderFiles.filter { entry in
@@ -26,16 +24,7 @@ public struct StartPageView: View {
             return false
         }
 
-        switch appVM.folderSortOrder {
-        case .folder:
-            return base
-        case .modified:
-            return base.sorted { $0.modified > $1.modified }
-        case .size:
-            return base.sorted { $0.size > $1.size }
-        case .name:
-            return base.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        }
+        return appVM.folderSort.sorted(base)
     }
 
     private var totalBytesInView: Int64 {
@@ -286,14 +275,6 @@ public struct StartPageView: View {
             .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(NSColor.separatorColor), lineWidth: 1))
 
-            Picker("Sort", selection: $appVM.folderSortOrder) {
-                ForEach(SortOrder.allCases, id: \.self) { order in
-                    Text(order.rawValue).tag(order)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 290)
-
             Text("\(displayedFiles.count) files · \(BenchmarkRunner.formatBytes(totalBytesInView))")
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundColor(.secondary)
@@ -315,7 +296,215 @@ public struct StartPageView: View {
 
     // MARK: - 4. SQLite Files List
 
+    // MARK: - 4a. Catalog table (default, banquet-db-list-style)
+
+    private enum Col {
+        static let folder: CGFloat = 150
+        static let tables: CGFloat = 64
+        static let views: CGFloat = 52
+        static let modified: CGFloat = 118
+        static let size: CGFloat = 84
+        static let open: CGFloat = 64
+    }
+
+    /// One row per database, one column per property; the headers sort. Sort state is
+    /// `appVM.folderSort`, the same state as the clause in the Banquet bar.
+    private var catalogTable: some View {
+        VStack(spacing: 0) {
+            catalogHeader
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(displayedFiles.enumerated()), id: \.element.id) { i, item in
+                        catalogRow(item, striped: i % 2 == 1)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.bottom, 8)
+    }
+
+    private var catalogHeader: some View {
+        HStack(spacing: 8) {
+            Color.clear.frame(width: 22, height: 1)
+            headerCell("Name", .name, width: nil, align: .leading)
+            headerCell("Folder", .location, width: Col.folder, align: .leading)
+            headerCell("Tables", .tableCount, width: Col.tables, align: .trailing)
+            Text("Views").frame(width: Col.views, alignment: .trailing)
+            headerCell("Modified", .modified, width: Col.modified, align: .trailing)
+            headerCell("Size", .size, width: Col.size, align: .trailing)
+            Color.clear.frame(width: Col.open, height: 1)
+        }
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+    }
+
+    private func headerCell(_ title: String, _ key: FolderSortKey, width: CGFloat?, align: Alignment) -> some View {
+        let active = appVM.folderSort.key == key
+        return Button {
+            appVM.folderSort = appVM.folderSort.toggled(to: key)
+        } label: {
+            HStack(spacing: 3) {
+                if align == .trailing { Spacer(minLength: 0) }
+                Text(title)
+                if active {
+                    Image(systemName: appVM.folderSort.descending ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 8, weight: .bold))
+                }
+                if align == .leading { Spacer(minLength: 0) }
+            }
+            .foregroundColor(active ? .primary : .secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(width: width, alignment: align)
+        .frame(maxWidth: width == nil ? .infinity : nil, alignment: align)
+        .help("Sort by \(title.lowercased()); click again to reverse")
+    }
+
+    private func catalogRow(_ item: SQLiteFileEntry, striped: Bool) -> some View {
+        let isOpen = appVM.openDocuments.contains(where: { $0.path == item.path })
+        let isCurrent = appVM.activeDocEntry?.path == item.path
+        return HStack(spacing: 8) {
+            Image(systemName: isCurrent ? "cylinder.split.1x2.fill" : "externaldrive.fill")
+                .font(.system(size: 13))
+                .foregroundColor(isCurrent ? .accentColor : (isOpen ? .green : .accentColor.opacity(0.85)))
+                .frame(width: 22)
+            HStack(spacing: 6) {
+                Text(item.name)
+                    .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
+                    .lineLimit(1).truncationMode(.middle)
+                if isCurrent {
+                    Text("ACTIVE")
+                        .font(.system(size: 8.5, weight: .bold))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(RoundedRectangle(cornerRadius: 3).fill(Color.accentColor.opacity(0.2)))
+                        .foregroundColor(.accentColor)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                appVM.selectedSubfolder = appVM.selectedSubfolder == item.relativeFolder ? nil : item.relativeFolder
+            } label: {
+                Text(item.relativeFolder == "." ? "root" : item.relativeFolder)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1).truncationMode(.head)
+            }
+            .buttonStyle(.plain)
+            .frame(width: Col.folder, alignment: .leading)
+            .help("Filter to folder '\(item.relativeFolder)'")
+            Text("\(item.tables.count)").frame(width: Col.tables, alignment: .trailing)
+            Text("\(item.views.count)").frame(width: Col.views, alignment: .trailing)
+            Text(item.modified > Date.distantPast ? Self.dateFormatter.string(from: item.modified) : "")
+                .frame(width: Col.modified, alignment: .trailing)
+            Text(BenchmarkRunner.formatBytes(item.size))
+                .fontWeight(.semibold)
+                .foregroundColor(item.size > 100_000_000 ? .orange : .primary)
+                .frame(width: Col.size, alignment: .trailing)
+            Button { appVM.open(path: item.path) } label: {
+                HStack(spacing: 3) {
+                    Text("Open").font(.system(size: 11, weight: .semibold))
+                    Image(systemName: "arrow.up.right").font(.system(size: 8, weight: .bold))
+                }
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(RoundedRectangle(cornerRadius: 5).fill(Color.accentColor))
+                .foregroundColor(.white)
+            }
+            .buttonStyle(.plain)
+            .frame(width: Col.open, alignment: .trailing)
+        }
+        .font(.system(size: 11, design: .monospaced))
+        .monospacedDigit()
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(isCurrent ? Color.accentColor.opacity(0.08)
+                    : (striped ? Color(NSColor.controlBackgroundColor).opacity(0.5) : Color.clear))
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { appVM.open(path: item.path) }
+        .contextMenu { fileMenu(item) }
+    }
+
+    // MARK: - 4b. Catalog cards
+
+    private var layoutPicker: some View {
+        Picker("Layout", selection: $appVM.folderListStyle) {
+            ForEach(FolderListStyle.allCases, id: \.self) { style in
+                Text(style.rawValue).tag(style)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 130)
+        .help("Table: one column per property. Cards: each database as a catalog card.")
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            ForEach(FolderSortKey.allCases, id: \.self) { key in
+                Button {
+                    appVM.folderSort = appVM.folderSort.key == key ? appVM.folderSort.toggled(to: key) : FolderSort(key: key)
+                } label: {
+                    if appVM.folderSort.key == key {
+                        Label("\(key.label) \(appVM.folderSort.descending ? "↓" : "↑")", systemImage: "checkmark")
+                    } else {
+                        Text(key.label)
+                    }
+                }
+            }
+        } label: {
+            Text("Sort: \(appVM.folderSort.key.label)\(appVM.folderSort.key == .scan ? "" : (appVM.folderSort.descending ? " ↓" : " ↑"))")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Same as the sort clause in the Banquet bar")
+    }
+
+    /// One slim row above the list: layout, sort (cards only; the table sorts from its headers),
+    /// totals, and the active folder filter.
+    private var catalogToolbar: some View {
+        HStack(spacing: 12) {
+            layoutPicker
+            if appVM.folderListStyle == .catalogCards { sortMenu }
+            Text("\(displayedFiles.count) databases · \(BenchmarkRunner.formatBytes(totalBytesInView))")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(.secondary)
+            Spacer(minLength: 0)
+            if let sub = appVM.selectedSubfolder {
+                Button { appVM.selectedSubfolder = nil } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "folder").font(.system(size: 10))
+                        Text(sub == "." ? "root" : sub).font(.system(size: 11, design: .monospaced))
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 10))
+                    }
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.15)))
+                    .foregroundColor(.accentColor)
+                }
+                .buttonStyle(.plain)
+                .help("Showing only this folder; click to show all")
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 6)
+    }
+
     private var sqliteFilesList: some View {
+        VStack(spacing: 0) {
+            catalogToolbar
+            Divider()
+            switch appVM.folderListStyle {
+            case .catalogTable: catalogTable
+            case .catalogCards: catalogCards
+            }
+        }
+    }
+
+    private var catalogCards: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 6) {
                 ForEach(displayedFiles) { item in
@@ -538,22 +727,25 @@ public struct StartPageView: View {
         .onTapGesture(count: 2) {
             appVM.open(path: item.path)
         }
-        .contextMenu {
-            Button("Open Database") {
-                appVM.open(path: item.path)
-            }
-            Button("Browse Enclosing Folder (\(item.relativeFolder))") {
-                appVM.openFolder(path: item.folderPath, showBrowser: true)
-            }
-            Divider()
-            Button("Reveal in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.path)])
-            }
-            Button("Copy Full File Path") {
-                let pb = NSPasteboard.general
-                pb.clearContents()
-                pb.setString(item.path, forType: .string)
-            }
+        .contextMenu { fileMenu(item) }
+    }
+
+    @ViewBuilder
+    private func fileMenu(_ item: SQLiteFileEntry) -> some View {
+        Button("Open Database") {
+            appVM.open(path: item.path)
+        }
+        Button("Browse Enclosing Folder (\(item.relativeFolder))") {
+            appVM.openFolder(path: item.folderPath, showBrowser: true)
+        }
+        Divider()
+        Button("Reveal in Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.path)])
+        }
+        Button("Copy Full File Path") {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(item.path, forType: .string)
         }
     }
 

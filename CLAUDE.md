@@ -4,7 +4,7 @@ Guidance for Claude Code (and humans) working in this repository.
 
 ## What this is
 
-`sqlswift` is a **read-only SQLite viewer** for macOS — a native Swift 6 / SwiftUI
+`sqlswift` is a **read-only SQLite viewer** (with an opt-in edit session) for macOS — a native Swift 6 / SwiftUI
 rewrite of the original Go `sqldoc`. The product is named **sqldoc** (bundle, CLI,
 menu bar); the repo is **sqlswift**.
 
@@ -25,9 +25,10 @@ stays empty. SQLite is the system library.
 1. **Read-only unless an edit session is explicitly entered.** Files open read-only
    (immutable where possible) and the viewer connections stay `PRAGMA query_only`.
    The only write path is an opt-in edit session (⌥⌘E): a separate read-write
-   connection that issues parameterised single-cell `UPDATE`s from a staged buffer
-   in one transaction. Never issue `INSERT` / `DELETE` / `CREATE` / DDL /
-   `PRAGMA writable_schema`; the query console is `SELECT`-only and that is enforced.
+   connection that issues parameterised single-cell `UPDATE`s and row `INSERT` /
+   `DELETE`s from a staged buffer in one transaction. Never issue `CREATE` / DDL /
+   `PRAGMA writable_schema` or user-supplied write SQL; the query console is
+   `SELECT`-only and that is enforced.
    See [`docs/BanquetEditStyle.md`](docs/BanquetEditStyle.md).
 2. **Constant-time access.** Row navigation is keyset (seek) pagination. Never
    reach for `LIMIT ? OFFSET ?` for scrolling — offset cost grows with depth.

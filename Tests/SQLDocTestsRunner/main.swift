@@ -1041,6 +1041,152 @@ func runAllTests() async {
         expectTrue(!wrote, "viewer connection must stay read-only")
     }
 
+    await test("EditBuffer: new rows, deletes, grouped undo/redo, batch") {
+        let b = EditBuffer()
+        let id1 = b.insertRow(table: "t", values: ["name": .text("n1")])
+        let id2 = b.insertRow(table: "t")
+        expectTrue(id1 < 0 && id2 < id1, "temp ids are negative and distinct")
+        b.setNewRowValue(id: id2, column: "name", value: .text("n2"))
+        expectEqual(b.newRows(table: "t").map(\.id), [id1, id2])
+        expectEqual(b.count, 2)
+
+        // Deleting a stored row also drops its pending cell edits; one undo restores both.
+        b.stage(CellEdit(table: "t", rowID: 1, column: "qty", original: .integer(10), new: .integer(11)))
+        expectEqual(b.count, 3)
+        b.deleteRow(table: "t", rowID: 1, original: ["id": .integer(1), "qty": .integer(10)])
+        expectTrue(b.isDeleted(table: "t", rowID: 1))
+        expectEqual(b.updateCount, 0)
+        expectEqual(b.deleteCount, 1)
+        // Edits to a row staged for delete are ignored.
+        b.stage(CellEdit(table: "t", rowID: 1, column: "qty", original: .integer(10), new: .integer(12)))
+        expectEqual(b.updateCount, 0)
+        b.undo()
+        expectTrue(!b.isDeleted(table: "t", rowID: 1))
+        expectEqual(b.pending(table: "t", rowID: 1, column: "qty"), .integer(11))
+        b.redo()
+        expectTrue(b.isDeleted(table: "t", rowID: 1))
+
+        // Deleting a new row just drops it.
+        b.deleteRow(table: "t", rowID: id1, original: [:])
+        expectEqual(b.insertCount, 1)
+        b.undo()
+        expectEqual(b.insertCount, 2)
+
+        // A batch is one undo step.
+        b.revert()
+        expectEqual(b.count, 0)
+        b.stageBatch([
+            CellEdit(table: "t", rowID: 1, column: "qty", original: .integer(10), new: .integer(1)),
+            CellEdit(table: "t", rowID: 2, column: "qty", original: .integer(20), new: .integer(2)),
+        ])
+        expectEqual(b.updateCount, 2)
+        b.undo()
+        expectEqual(b.count, 0)
+        expectTrue(!b.canUndo)
+    }
+
+    await test("EditSession: insert + delete + update commit in one transaction, preview matches") {
+        let path = try makeEditDB()
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let doc = try Doc.open(path: path)
+        defer { doc.close() }
+        let s = try EditSession(doc: doc)
+        defer { s.close() }
+
+        s.buffer.stage(CellEdit(table: "t", rowID: 1, column: "qty", original: .integer(10), new: .integer(99)))
+        s.buffer.deleteRow(table: "t", rowID: 2, original: [
+            "id": .integer(2), "name": .text("b"), "qty": .integer(20), "price": .real(2.5), "note": .text("x"),
+        ])
+        s.buffer.insertRow(table: "t", values: ["name": .text("it's"), "qty": .integer(7)])
+        let preview = s.sqlPreview()
+        expectEqual(preview.count, 3)
+        expectTrue(preview[0].hasPrefix("UPDATE \"t\" SET \"qty\" = 99"))
+        expectTrue(preview[1].hasPrefix("DELETE FROM \"t\" WHERE rowid = 2"))
+        expectTrue(preview[2].contains("'it''s'"), "preview escapes quotes")
+        try s.commit()
+        expectEqual(s.buffer.count, 0)
+        let check = try SQLiteConnection(path: path)
+        expectEqual(try check.queryRow("SELECT qty FROM t WHERE id=1")?.first, .integer(99))
+        expectEqual(try check.queryRow("SELECT count(*) FROM t WHERE name='b'")?.first, .integer(0)) // the insert reuses id 2
+        expectEqual(try check.queryRow("SELECT qty FROM t WHERE name='it''s'")?.first, .integer(7))
+        check.close()
+    }
+
+    await test("EditSession: a failed insert or stale delete rolls everything back") {
+        let path = try makeEditDB()
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let doc = try Doc.open(path: path)
+        defer { doc.close() }
+        let s = try EditSession(doc: doc)
+        defer { s.close() }
+
+        // NOT NULL column `name` has no default: refused before anything is written.
+        s.buffer.stage(CellEdit(table: "t", rowID: 1, column: "qty", original: .integer(10), new: .integer(55)))
+        s.buffer.insertRow(table: "t", values: ["qty": .integer(1)])
+        expectEqual(s.missingRequiredColumns(table: "t", values: ["qty": .integer(1)]), ["name"])
+        var refused = false
+        do { try s.commit() } catch let e as EditError { if case .invalidValue = e { refused = true } }
+        expectTrue(refused)
+        let c1 = try SQLiteConnection(path: path)
+        expectEqual(try c1.queryRow("SELECT qty FROM t WHERE id=1")?.first, .integer(10))
+        c1.close()
+        s.buffer.revert()
+
+        // Delete whose original no longer matches: conflict, and the earlier update rolls back.
+        s.buffer.stage(CellEdit(table: "t", rowID: 1, column: "qty", original: .integer(10), new: .integer(55)))
+        s.buffer.deleteRow(table: "t", rowID: 2, original: ["id": .integer(2), "qty": .integer(999)])
+        var conflicted = false
+        do { try s.commit() } catch let e as EditError { if case .conflict = e { conflicted = true } }
+        expectTrue(conflicted)
+        let c2 = try SQLiteConnection(path: path)
+        expectEqual(try c2.queryRow("SELECT qty FROM t WHERE id=1")?.first, .integer(10))
+        expectEqual(try c2.queryRow("SELECT count(*) FROM t WHERE id=2")?.first, .integer(1))
+        c2.close()
+
+        // A delete with a clipped/BLOB guard column commits on the remaining columns.
+        s.buffer.revert()
+        s.buffer.deleteRow(table: "t", rowID: 2, original: [
+            "id": .integer(2), "note": .textPrefix("x", totalBytes: 9_999_999),
+        ])
+        try s.commit()
+    }
+
+    await test("CellCoercion: empty string only for non-numeric columns") {
+        expectEqual(try? CellCoercion.emptyString(for: Column(name: "n", type: "TEXT")).get(), .text(""))
+        expectTrue((try? CellCoercion.emptyString(for: Column(name: "q", type: "INTEGER")).get()) == nil)
+    }
+
+    await test("FolderSort: columns, direction, URL clause, header toggle") {
+        func f(_ name: String, size: Int64, tables: Int, mod: TimeInterval, folder: String = ".") -> SQLiteFileEntry {
+            SQLiteFileEntry(path: "/x/\(folder)/\(name)", name: name, folderPath: "/x/\(folder)", relativeFolder: folder,
+                            relativePath: "\(folder)/\(name)", size: size, modified: Date(timeIntervalSince1970: mod),
+                            tables: (0..<tables).map { "t\($0)" }, views: [])
+        }
+        let files = [f("b.db", size: 300, tables: 2, mod: 100), f("a.db", size: 100, tables: 9, mod: 300),
+                     f("c.db", size: 200, tables: 2, mod: 200, folder: "z")]
+        func names(_ s: FolderSort) -> [String] { s.sorted(files).map(\.name) }
+        expectEqual(names(FolderSort(key: .size)), ["b.db", "c.db", "a.db"])               // numbers default largest first
+        expectEqual(names(FolderSort(key: .size, descending: false)), ["a.db", "c.db", "b.db"])
+        expectEqual(names(FolderSort(key: .tableCount)), ["a.db", "b.db", "c.db"])         // tie on 2 falls back to name
+        expectEqual(names(FolderSort(key: .modified)), ["a.db", "c.db", "b.db"])
+        expectEqual(names(FolderSort(key: .name)), ["a.db", "b.db", "c.db"])
+        expectEqual(names(FolderSort(key: .location)), ["a.db", "b.db", "c.db"])           // "." before "z", then name
+        expectEqual(names(.scanOrder), ["b.db", "a.db", "c.db"])                           // scan order untouched
+
+        expectEqual(FolderSort.scanOrder.urlClause, "")
+        expectEqual(FolderSort(key: .size).urlClause, "-size_bytes")
+        expectEqual(FolderSort(key: .tableCount, descending: false).urlClause, "+table_count")
+        expectEqual(FolderSortKey(column: "size_bytes"), .size)
+        expectEqual(FolderSortKey(column: "table_count"), .tableCount)
+        expectEqual(FolderSortKey(column: "modified"), .modified)
+        expectTrue(FolderSortKey(column: "status") == nil)
+
+        let s1 = FolderSort.scanOrder.toggled(to: .size)
+        expectEqual(s1, FolderSort(key: .size, descending: true))
+        expectEqual(s1.toggled(to: .size), FolderSort(key: .size, descending: false))     // same header flips
+        expectEqual(s1.toggled(to: .name), FolderSort(key: .name, descending: false))      // another header resets to its default
+    }
+
     // Query control (docs/GUIStability.md, technique 3)
     // A statement that never finishes on its own.
     let endless = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n"

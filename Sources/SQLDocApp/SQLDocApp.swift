@@ -87,7 +87,6 @@ struct SqlSwiftApp: App {
                 Button("Export Table as CSV…") {
                     appVM.exportCurrentTable()
                 }
-                .keyboardShortcut("e", modifiers: .command)
                 .disabled(appVM.activeDocEntry == nil)
 
                 Button("Close Database") {
@@ -124,6 +123,23 @@ struct SqlSwiftApp: App {
                     .disabled(!appVM.edit.isDirty)
 
                 Button("Revert Edits") { appVM.edit.revert() }
+                    .disabled(!appVM.edit.isDirty)
+
+                Divider()
+
+                // Disabled while the Banquet bar has the keyboard, so ⌘⌫ and friends reach its text field.
+                let rowOpsOff = !appVM.edit.canEditActiveTable || appVM.isBanquetBarEditing
+                Button("New Row") { appVM.edit.newRow() }
+                    .keyboardShortcut("n", modifiers: [.command, .option])
+                    .disabled(rowOpsOff)
+                Button("Duplicate Row") { Task { await appVM.edit.duplicateSelectedRow() } }
+                    .keyboardShortcut("d", modifiers: .command)
+                    .disabled(rowOpsOff)
+                Button("Delete Row") { appVM.edit.deleteSelectedRows() }
+                    .keyboardShortcut(.delete, modifiers: .command)
+                    .disabled(rowOpsOff)
+                Button("Show Pending SQL…") { appVM.edit.showSQLPreview = true }
+                    .keyboardShortcut("p", modifiers: [.command, .option])
                     .disabled(!appVM.edit.isDirty)
             }
 

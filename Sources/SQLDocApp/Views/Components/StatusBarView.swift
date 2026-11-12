@@ -29,7 +29,7 @@ public struct StatusBarView: View {
                     Label(why, systemImage: "lock")
                         .font(.system(size: 11)).foregroundColor(.secondary)
                 } else {
-                    Text(appVM.edit.pendingCount == 0 ? "editing" : "\(appVM.edit.pendingCount) pending")
+                    Text(appVM.edit.pendingCount == 0 ? "editing" : "\(appVM.edit.pendingCount) pending (\(appVM.edit.updateCount)✎ \(appVM.edit.insertCount)＋ \(appVM.edit.deleteCount)−)")
                         .font(.system(size: 11, weight: .semibold)).foregroundColor(.orange)
                     if appVM.edit.isDirty {
                         Button("Commit") { appVM.edit.commit() }.controlSize(.small)

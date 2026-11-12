@@ -1,3 +1,6 @@
+# locating Banquet here to simplify docs improvement
+banquet/
+
 # Xcode & Swift Package Manager
 .build/
 .swiftpm/

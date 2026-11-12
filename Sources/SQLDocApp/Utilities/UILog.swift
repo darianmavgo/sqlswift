@@ -30,6 +30,7 @@ enum UILog {
     }()
 
     static var isEnabled: Bool { dir != nil }
+    static var directory: URL? { dir }
     static var commandFilePath: String? { dir?.appendingPathComponent("ui-command.txt").path }
 
     /// Call once at launch: keeps the previous run as `ui.log.prev`.

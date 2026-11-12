@@ -25,11 +25,12 @@ public struct CellInspectInfo: Identifiable, @unchecked Sendable {
     }
 }
 
-public enum FolderSortOrder: String, CaseIterable, Sendable {
-    case folder = "By Folder"
-    case modified = "Newest"
-    case size = "Largest"
-    case name = "Name"
+/// How the folder's databases are laid out. Host chrome, never part of the Banquet URL.
+public enum FolderListStyle: String, CaseIterable, Sendable {
+    /// The banquet-db-list-style default: one row per database, one column per property.
+    case catalogTable = "Table"
+    /// "Catalog cards": each database as a card with its properties flowing, no strict columns.
+    case catalogCards = "Cards"
 }
 
 @MainActor
@@ -60,7 +61,12 @@ public final class AppViewModel: ObservableObject {
         didSet { saveHotReloadSession() }
     }
     @Published public var folderSearchQuery: String = ""
-    @Published public var folderSortOrder: FolderSortOrder = .folder
+    @Published public var folderSort: FolderSort = .scanOrder
+    @Published public var folderListStyle: FolderListStyle = {
+        UserDefaults.standard.string(forKey: "sqldoc.folderListStyle").flatMap(FolderListStyle.init(rawValue:)) ?? .catalogTable
+    }() {
+        didSet { UserDefaults.standard.set(folderListStyle.rawValue, forKey: "sqldoc.folderListStyle") }
+    }
     @Published public var extraQueryParams: [String] = []
     @Published public var isScanningFolder: Bool = false
     @Published public var isFindBarVisible: Bool = false
@@ -164,6 +170,9 @@ public final class AppViewModel: ObservableObject {
             "banquetBarText": banquetBarText,
             "editing": edit.isEditing(activeDocEntry),
             "pendingEdits": edit.pendingCount,
+            "pendingUpdates": edit.updateCount,
+            "pendingInserts": edit.insertCount,
+            "pendingDeletes": edit.deleteCount,
             "suggestions": banquetSuggestionsSnapshot,
             "nav": ["back": canNavigateBack, "forward": canNavigateForward, "current": navStack.current ?? ""] as [String: Any],
             "folder": [
@@ -171,7 +180,8 @@ public final class AppViewModel: ObservableObject {
                 "subfolder": selectedSubfolder ?? "",
                 "dbCount": folderFiles.count,
                 "dbs": folderFiles.prefix(12).map { URL(fileURLWithPath: $0.path).lastPathComponent },
-                "sort": "\(folderSortOrder)",
+                "sort": folderSort.urlClause,
+                "listStyle": folderListStyle.rawValue,
             ] as [String: Any],
         ]
         if let sel = selectedCell { s["selectedCell"] = ["row": sel.row, "col": sel.col] }
@@ -823,16 +833,7 @@ public final class AppViewModel: ObservableObject {
             // Never emit a `databases` segment: a bare container ends in "/", and a sort
             // clause is itself clause-like so the parser still reads it as a collection.
             if !url.hasSuffix("/") { url += "/" }
-            switch folderSortOrder {
-            case .size:
-                url += "-size_bytes"
-            case .modified:
-                url += "-modified"
-            case .name:
-                url += "+name"
-            case .folder:
-                break
-            }
+            url += folderSort.urlClause
             var qParams: [String] = []
             let q = folderSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
             if !q.isEmpty {
@@ -999,15 +1000,11 @@ public final class AppViewModel: ObservableObject {
             }
 
             // Map collection sort
-            if let sc = b.sortColumn?.lowercased() {
-                if sc.contains("size") {
-                    folderSortOrder = .size
-                } else if sc.contains("mod") || sc.contains("date") || sc.contains("time") {
-                    folderSortOrder = .modified
-                } else if sc.contains("name") {
-                    folderSortOrder = .name
+            if let sc = b.sortColumn {
+                if let key = FolderSortKey(column: sc) {
+                    folderSort = FolderSort(key: key, descending: b.isSortDesc)
                 } else {
-                    folderSortOrder = .folder
+                    folderSort = .scanOrder
                 }
             }
 

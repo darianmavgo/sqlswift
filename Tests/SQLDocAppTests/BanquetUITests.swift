@@ -163,6 +163,117 @@ struct BanquetUITests {
         appVM.edit.exit()
     }
 
+    /// Row operations (docs/HighRepEdit.md): new, delete and duplicate stage in the buffer,
+    /// leave the Banquet URL untouched, and commit together.
+    @Test func rowOpsStageCommitAndKeepURL() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sqldoc-ui-rowops-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let path = dir.appendingPathComponent("items.db").path
+        let conn = try SQLiteConnection(path: path, readOnly: false)
+        try conn.exec("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL, qty INTEGER)")
+        try conn.exec("INSERT INTO items VALUES (1,'a',1),(2,'b',2),(3,'c',3)")
+        conn.close()
+
+        let (appVM, lifecycle) = await open("\(path)/items[0:100]")
+        func run(_ step: String) async {
+            UICommandRunner.execute(step, appVM: appVM)
+            await settle(appVM, lifecycle: lifecycle)
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
+        let urlPlain = appVM.banquetURLString(for: appVM.activeTableVM)
+        await run("edit on")
+        #expect(appVM.banquetURLString(for: appVM.activeTableVM) == urlPlain, "edit mode must not change the URL")
+
+        await run("newrow name nn qty 5")
+        await run("deleterow 0")
+        await run("duplicaterow 1")
+        let snap = appVM.uiStateSnapshot()
+        #expect(snap["pendingInserts"] as? Int == 2)
+        #expect(snap["pendingDeletes"] as? Int == 1)
+        #expect(appVM.banquetURLString(for: appVM.activeTableVM) == urlPlain, "row ops must not change the URL")
+        #expect(appVM.edit.sqlPreview.count == 3)
+
+        // Navigating while dirty keeps the pending rows (rule 11).
+        await run("sort name desc")
+        #expect(appVM.edit.pendingCount == 3)
+        await run("sort - ")
+
+        // One undo step per op; undo the duplicate and redo it.
+        appVM.edit.undo(); #expect(appVM.edit.insertCount == 1)
+        appVM.edit.redo(); #expect(appVM.edit.insertCount == 2)
+
+        await run("commit")
+        #expect(appVM.errorMessage == nil, "\(appVM.errorMessage ?? "")")
+        #expect(appVM.edit.pendingCount == 0)
+        let check = try SQLiteConnection(path: path)
+        #expect(try check.queryRow("SELECT count(*) FROM items")?.first == .integer(4))
+        #expect(try check.queryRow("SELECT count(*) FROM items WHERE name='a'")?.first == .integer(0))
+        #expect(try check.queryRow("SELECT count(*) FROM items WHERE name='b'")?.first == .integer(2))
+        #expect(try check.queryRow("SELECT qty FROM items WHERE name='nn'")?.first == .integer(5))
+        check.close()
+        #expect(appVM.activeTableVM?.fileChangedOnDisk == false)
+        appVM.edit.exit()
+    }
+
+    /// The folder catalog sorts by any column, in either direction, and the Banquet bar and the
+    /// list's sort state are one thing: a clause in the bar sets the sort, a header click sets the clause.
+    @Test func folderCatalogSortsAndTracksTheBar() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sqldoc-ui-folder-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        func make(_ name: String, tables: Int, rows: Int) throws {
+            let c = try SQLiteConnection(path: dir.appendingPathComponent(name).path, readOnly: false)
+            for t in 0..<tables {
+                try c.exec("CREATE TABLE t\(t) (id INTEGER PRIMARY KEY, v TEXT)")
+                for r in 0..<rows { try c.exec("INSERT INTO t\(t)(v) VALUES (printf('%.*c', 200, 'x\(r)'))") }
+            }
+            c.close()
+        }
+        try make("small.db", tables: 5, rows: 1)
+        try make("big.db", tables: 1, rows: 400)
+        try make("mid.db", tables: 3, rows: 20)
+
+        let appVM = AppViewModel()
+        // AppViewModel restores the dev app's saved session asynchronously; let that land first,
+        // or it would overwrite the folder this test opens.
+        for _ in 0..<500 where appVM.inFlightOpens > 0 || appVM.isScanningFolder { try? await Task.sleep(nanoseconds: 10_000_000) }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        func names() -> [String] { appVM.folderSort.sorted(appVM.folderFiles).map(\.name) }
+        func go(_ step: String) async {
+            UICommandRunner.execute(step, appVM: appVM)
+            for _ in 0..<300 where appVM.isScanningFolder { try? await Task.sleep(nanoseconds: 10_000_000) }
+            // The dev app's saved session may restore another folder first: wait for this one's files.
+            for _ in 0..<500 where !appVM.folderFiles.contains(where: { $0.path.hasPrefix(dir.path) && $0.name == "small.db" }) || appVM.inFlightOpens > 0 {
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        func sortField() -> String { (appVM.uiStateSnapshot()["folder"] as? [String: Any])?["sort"] as? String ?? "?" }
+
+        await go("url \(dir.path)/-table_count")
+        #expect(sortField() == "-table_count")
+        #expect(names() == ["small.db", "mid.db", "big.db"])
+        #expect(appVM.banquetURLString(for: nil).hasSuffix("/-table_count"))
+
+        await go("url \(dir.path)/+table_count")        // direction is honoured, not guessed
+        #expect(names() == ["big.db", "mid.db", "small.db"])
+
+        await go("url \(dir.path)/-size_bytes")
+        #expect(names() == ["big.db", "mid.db", "small.db"])
+        await go("url \(dir.path)/+size_bytes")
+        #expect(names() == ["small.db", "mid.db", "big.db"])
+
+        // A header click is the same state as the bar clause, and the URL follows it.
+        appVM.folderSort = appVM.folderSort.toggled(to: .name)
+        #expect(appVM.banquetURLString(for: nil).hasSuffix("/+name"))
+        appVM.folderSort = appVM.folderSort.toggled(to: .name)
+        #expect(appVM.banquetURLString(for: nil).hasSuffix("/-name"))
+        // ...and the URL the bar shows is a fixed point.
+        let shown = appVM.banquetURLString(for: nil)
+        await go("url \(shown)")
+        #expect(appVM.banquetURLString(for: nil) == shown)
+        #expect(names() == ["small.db", "mid.db", "big.db"])
+    }
+
     // MARK: - Big-data behaviour (docs/GUIStability.md)
 
     private func open(_ url: String) async -> (AppViewModel, () -> Void) {

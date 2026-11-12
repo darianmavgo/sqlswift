@@ -5,9 +5,9 @@ import Foundation
 
 public enum BuildInfo {
     /// Short hash of HEAD when this binary was built.
-    public static let commit = "3bac40409"
+    public static let commit = "b979af6f4"
     /// Commit date of HEAD (YYYY-MM-DD).
-    public static let commitDate = "2026-11-10"
+    public static let commitDate = "2026-11-11"
     /// Branch HEAD was on at build time.
     public static let branch = "sqlswiftedit"
     /// True when the working tree had uncommitted changes at build time.

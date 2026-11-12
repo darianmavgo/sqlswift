@@ -18,7 +18,6 @@ public let sqldocKeybindings: [SQLDocKeybinding] = [
     SQLDocKeybinding(action: "edit-redo", chord: "mod+shift+z", context: "table", label: "Redo a staged edit"),
     SQLDocKeybinding(action: "edit-toggle", chord: "mod+alt+e", context: "table", label: "Toggle edit mode"),
     SQLDocKeybinding(action: "edit-undo", chord: "mod+z", context: "table", label: "Undo a staged edit"),
-    SQLDocKeybinding(action: "export-csv", chord: "mod+e", context: "table", label: "Export table as CSV"),
     SQLDocKeybinding(action: "find", chord: "mod+f", context: "table", label: "Find in table"),
     SQLDocKeybinding(action: "find-close", chord: "escape", context: "find", label: "Close the find bar"),
     SQLDocKeybinding(action: "find-next", chord: "enter", context: "find", label: "Next match"),

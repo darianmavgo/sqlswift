@@ -21,6 +21,9 @@ import SQLDocCore
 ///   cancel                         stop the page load in flight
 ///   scroll <row>                   bring a row of the loaded page to the top
 ///   inspect <row> <column>         open the cell inspector
+///   layout table|cards            folder list layout
+///   snapshot [name]                write the app window to bin/<name>.png (default ui-snapshot); no
+///                                  macOS permission needed, the app draws itself
 @MainActor
 final class UICommandRunner {
     private var timer: Timer?
@@ -125,6 +128,34 @@ final class UICommandRunner {
             // inspect <row> <col>   opens the cell inspector, as a double-click does outside edit mode
             let a = rest.split(separator: " ").map(String.init)
             if let vm, a.count == 2, let r = Int(a[0]) { vm.inspectRequest = (row: r, column: a[1]) }
+        case "newrow":
+            // newrow [<col> <value…> …]   stages a new row; pairs fill its columns
+            appVM.edit.newRow()
+            appVM.edit.editingNewCell = nil
+            if let vm, let id = appVM.edit.session?.buffer.allNewRows().last?.id {
+                let a = rest.split(separator: " ").map(String.init)
+                var i = 0
+                while i + 1 < a.count {
+                    if let col = vm.columns.first(where: { $0.name == a[i] }) {
+                        _ = appVM.edit.stageNewRowCell(id: id, column: col, text: a[i + 1])
+                    }
+                    i += 2
+                }
+            }
+        case "deleterow":
+            // deleterow <row>   (0-based index in the loaded page)
+            if let r = Int(rest) { appVM.selectedRowIndex = r; appVM.edit.deleteSelectedRows() }
+        case "duplicaterow":
+            if let r = Int(rest) { appVM.selectedRowIndex = r; Task { await appVM.edit.duplicateSelectedRow() } }
+        case "layout":
+            // layout table|cards   the folder list's layout (host chrome, not in the URL)
+            if let style = FolderListStyle.allCases.first(where: { $0.rawValue.lowercased() == rest.lowercased() }) {
+                appVM.folderListStyle = style
+            }
+        case "snapshot":
+            #if DEBUG
+            UIScreenshot.capture(name: rest)
+            #endif
         case "commit":
             appVM.edit.commit()
         case "revert":

@@ -41,6 +41,12 @@ public struct MainView: View {
                 .overlay(Divider(), alignment: .bottom)
                 .zIndex(10) // the suggestion dropdown hangs below the bar, over the content
 
+            if appVM.edit.isEditing(appVM.activeDocEntry), !appVM.isFolderBrowserVisible {
+                EditToolbarView(appVM: appVM, tableVM: activeTableVM)
+            } else if appVM.activeDocEntry != nil, !appVM.isFolderBrowserVisible {
+                EditEntryStrip(appVM: appVM)
+            }
+
             HStack(spacing: 0) {
                 if appVM.showSidebar, appVM.activeDocEntry != nil {
                     TableSidebarView(appVM: appVM, palette: palette)
@@ -78,6 +84,12 @@ public struct MainView: View {
                 .padding()
                 .frame(minWidth: 540, minHeight: 400)
         }
+        .sheet(isPresented: Binding(
+            get: { appVM.edit.showSQLPreview },
+            set: { appVM.edit.showSQLPreview = $0 }
+        )) {
+            SQLPreviewSheet(edit: appVM.edit) { appVM.edit.showSQLPreview = false }
+        }
         .sheet(isPresented: $appVM.showSchemaSheet) {
             if let entry = appVM.activeDocEntry, !appVM.selectedTableName.isEmpty {
                 SchemaSheetView(doc: entry.doc, tableName: appVM.selectedTableName) {
@@ -113,7 +125,7 @@ public struct MainView: View {
     private var contentArea: some View {
         HStack(spacing: 0) {
             gridArea
-            if appVM.showRowDetail, appVM.isThinTable, !appVM.isFolderBrowserVisible,
+            if appVM.showRowDetail, appVM.isThinTable || appVM.edit.canEditActiveTable, !appVM.isFolderBrowserVisible,
                let activeTableVM {
                 RowDetailPanel(appVM: appVM, tableVM: activeTableVM)
             }

@@ -5,8 +5,8 @@
 in a SQLite file. It does **not** change the Banquet URL grammar. If it holds up it can
 be promoted to `banquet/standards/`.
 
-Scope of this revision: **updating existing cell values only.** No row insert/delete, no
-schema changes, no user-supplied write SQL.
+Scope of this revision: **cell updates plus row insert and delete, inside an edit session
+only.** No schema changes, no user-supplied write SQL.
 
 ## Conventions & Rules
 
@@ -44,8 +44,21 @@ schema changes, no user-supplied write SQL.
 12. **After commit.** The page reloads, counts and column caches invalidate, and the
     client MUST NOT report its own write as an external change on disk.
 13. **Guarantees retained.** Outside an edit session no write path exists. Inside one,
-    only parameterised single-cell `UPDATE` statements are issued: no DDL, no
+    only parameterised single-cell `UPDATE`, row `INSERT` and row `DELETE` statements are
+    issued, all from the staged buffer in the one commit transaction: no DDL, no
     user-supplied SQL. The query console remains SELECT-only.
+14. **Row operations.** New rows (negative temporary ids) and deleted rows live in the
+    buffer beside cell edits and share its undo stack. Commit order is updates, deletes,
+    inserts. A delete carries the same `IS <original>` guard per column. An insert binds
+    only the columns the user set, so defaults and autoincrement apply; a NOT NULL column
+    with no default must be set. Deleting a row drops its pending cell edits. Pending new
+    rows render in a footer outside page and keyset logic, never merged into a `Page`.
+15. **Pending SQL.** The exact statements a commit would run can be previewed (display
+    only, never executed).
+16. **Bar guardrails (normative).** Row operations never read, write or append to the
+    Banquet URL; add no controls inside the Banquet bar (only the `EDIT` badge); disable
+    every new shortcut while the bar's text field has focus; and never change keyset
+    paging. `banquet-ui-cases.json` must stay green with pending row operations present.
 
 ## sqlswift bindings
 
@@ -55,3 +68,19 @@ schema changes, no user-supplied write SQL.
 | 4, 6, 7, 9, 10 | `SQLDocCore/Engine/Editor.swift` (`EditBuffer`, `CellCoercion`, `Doc.commit`) |
 | 2, 3, 5, 11 | `EditViewModel`, `VirtualizedGridView`, `StatusBarView` |
 | keys | ⌥⌘E toggle, ⌘S commit, ⌘Z / ⇧⌘Z undo/redo (rows in `config/seed.sql`) |
+
+## Screenshots
+
+*Captured from the sqlswift dev app (`scripts/gui-access.sh`, `snapshot` UI command). The bar shows the canonical URL for each view.*
+
+
+
+**Read-only by default (rule 1)** — no `EDIT` badge, bar unchanged:
+
+![idle](../banquet/standards/img/edit-idle.png)
+
+
+
+**Edit session (rules 2, 3, 7, 14)** — `EDIT · 4` badge, bar URL unchanged; tinted pending cells, a struck-through deleted row, a new row, and Commit / Revert in the status bar:
+
+![session](../banquet/standards/img/edit-session.png)

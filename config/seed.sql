@@ -212,7 +212,6 @@ INSERT INTO keybinding(action,chord,context,label,platform) VALUES
   ('zoom-in',          'mod+plus',     'table', 'Zoom in',                    'all'),
   ('zoom-out',         'mod+minus',    'table', 'Zoom out',                   'all'),
   ('zoom-reset',       'mod+0',        'table', 'Actual size',                'all'),
-  ('export-csv',       'mod+e',        'table', 'Export table as CSV',        'all'),
   ('row-down',         'arrowdown',    'table', 'Move down one row',          'all'),
   ('row-up',           'arrowup',      'table', 'Move up one row',            'all'),
   ('page-down',        'pagedown',     'table', 'Move down one screen',       'all'),

@@ -102,7 +102,17 @@ No upstream standard covers writing. The whole feature is specified in
 | bar-style 6 (MUST) | ↑/↓ recall evaluated URLs; ↓ returns to the unsubmitted draft | not implemented: ↑ is ignored, ↓ opens the suggestion dropdown |
 | bar-style 9 (MUST) | Back/forward on Alt+←/→ (or Ctrl+[ / Ctrl+]) | ⌘[ / ⌘] (see A5) |
 | db-list-style | `?depth=N` bounds collection recursion | not handled |
-| db-list-style | In-memory `databases` / `tables` catalogs with required columns (`name`, `location`, `key`, `table_count`, `size`, `size_bytes`, `modified`, `status`, `open`) | `CollectionCatalog.generate` is an unused stub; folders are shown through `FolderScanner` |
+| db-list-style | In-memory `databases` / `tables` catalogs with required columns (`name`, `location`, `key`, `table_count`, `size`, `size_bytes`, `modified`, `status`, `open`) | `CollectionCatalog.generate` is an unused stub; folders are shown through `FolderScanner` and a native SwiftUI list, not an in-memory SQLite catalog. The list follows the standard's shape (one row per database, sortable `name` / `location` / `table_count` / `size_bytes` / `modified`); sort is one state shared with the bar clause (`-size_bytes`, `+table_count`, …, `FolderSort`). `status`, `key` and `open` columns are not shown, and no `tables` catalog exists |
 | table-list-style | Tiny tables (under 20 rows) shown inline, one grid per table | absent |
 | query-style | Trim probe samples 2000 rows | 1000 (`QueryStyle.swift`) |
 | `BanquetSwift.md` | Conformance corpus + `make conformance` | absent here; the upstream repo has no `conformance/` either |
+
+### Folder list layouts and the term "catalog card"
+
+The folder list has two layouts (`FolderListStyle`, host chrome, never in the URL):
+
+- **Table** (default): the db-list-style rendering, one column per property, headers sort.
+- **Cards**: each database as a **catalog card**, i.e. the same properties (name, folder, table and view
+  counts, modified, size) printed as a flowing card with its table chips and a Peek, not aligned into columns.
+
+"Catalog card" is the name for any one record shown that way: its properties laid out as a card instead of a row.

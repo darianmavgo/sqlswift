@@ -153,6 +153,7 @@ public struct VirtualizedGridView: View {
 
                         ScrollViewReader { proxy in
                         ScrollView(.vertical, showsIndicators: true) {
+                            VStack(alignment: .leading, spacing: 0) {
                             Group {
                                 if tableVM.isLoading && tableVM.currentPage == nil {
                                     skeletonRows(visCols)
@@ -166,6 +167,8 @@ public struct VirtualizedGridView: View {
                             .background(GeometryReader { g in
                                 Color.clear.preference(key: GridScrollYKey.self, value: -g.frame(in: .named("gridV")).minY)
                             })
+                            newRowsFooter(visCols: visCols, width: width)
+                            }
                         }
                         .coordinateSpace(name: "gridV")
                         .frame(height: bodyHeight)
@@ -176,6 +179,9 @@ public struct VirtualizedGridView: View {
                             tableVM.scrollRowRequest = nil
                             // Next turn, once the anchor has moved to that row.
                             DispatchQueue.main.async { proxy.scrollTo(Self.scrollAnchorID, anchor: .top) }
+                        }
+                        .onChange(of: appVM.edit.revealNewRowsToken) { _, _ in
+                            DispatchQueue.main.async { proxy.scrollTo(Self.newRowsID, anchor: .bottom) }
                         }
                         }
                     }
@@ -308,16 +314,25 @@ public struct VirtualizedGridView: View {
         let rowID = index < page.rowIDs.count ? page.rowIDs[index] : nil
         let isRowMatched = rowID != nil && rowID == tableVM.activeMatchRowID
         let isRowSelected = appVM.selectedRowIndex == index
+        let isRowDeleted = rowID.map { appVM.edit.isDeleted(table: page.table, rowID: $0) } ?? false
+        let isRowMarked = rowID.map { appVM.edit.markedRowIDs.contains($0) } ?? false
 
         return HStack(spacing: 0) {
             Text(tableVM.hidesRowNumbers ? "" : SQLiteValueFormatBridge.ordinal(rowOrdinal))
                 .font(.system(size: 11 * zoom, weight: .regular, design: .monospaced))
-                .foregroundColor(palette.dim)
+                .foregroundColor(isRowMarked ? Color.accentColor : palette.dim)
                 .padding(.trailing, 8)
                 .frame(width: gutterWidth, height: rowHeight, alignment: .top)
                 .padding(.top, 4)
+                .background(isRowMarked ? Color.accentColor.opacity(0.18) : Color.clear)
                 .contentShape(Rectangle())
                 .onTapGesture {
+                    // ⌘-click marks rows for row operations in edit mode (docs/HighRepEdit.md).
+                    if canEditPage, NSEvent.modifierFlags.contains(.command), let id = rowID {
+                        if appVM.edit.markedRowIDs.contains(id) { appVM.edit.markedRowIDs.remove(id) }
+                        else { appVM.edit.markedRowIDs.insert(id) }
+                        return
+                    }
                     appVM.selectedRowIndex = index
                     appVM.selectedCell = (row: index, col: cols.first?.fullIndex ?? 0)
                     isGridFocused = true
@@ -368,7 +383,8 @@ public struct VirtualizedGridView: View {
                     isSelected: isCellSelected,
                     isActiveMatch: isActiveMatchCell,
                     isPending: pendingVal != nil,
-                    originalText: pendingVal != nil ? cellVal.rawText : nil
+                    originalText: pendingVal != nil ? cellVal.rawText : nil,
+                    isDeleted: isRowDeleted
                 )
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { activate(page: page, row: index, col: c) }
@@ -407,22 +423,115 @@ public struct VirtualizedGridView: View {
                       palette: palette)
     }
 
+    // MARK: - New rows (docs/HighRepEdit.md)
+
+    private static let newRowsID = "gridNewRows"
+
+    /// Pending INSERTs, drawn from the edit buffer below the loaded page. They are never part
+    /// of the page query, so paging, sorting and the Banquet URL are unaffected.
+    @ViewBuilder
+    private func newRowsFooter(visCols: [GridCol], width: CGFloat) -> some View {
+        if canEditPage, let page = tableVM.currentPage {
+            let pending = appVM.edit.newRows(table: page.table)
+            if !pending.isEmpty {
+                let lead = visCols.first?.x ?? 0
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(pending, id: \.id) { nr in
+                        HStack(spacing: 0) {
+                            Text("new")
+                                .font(.system(size: 10 * zoom, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.green)
+                                .padding(.trailing, 8)
+                                .frame(width: gutterWidth, height: rowHeight, alignment: .trailing)
+                            if lead > 0 { Color.clear.frame(width: lead, height: rowHeight) }
+                            ForEach(visCols, id: \.col.id) { entry in newRowCell(nr, entry) }
+                        }
+                        .frame(width: width, alignment: .leading)
+                        .background(Color.green.opacity(0.10))
+                        .overlay(alignment: .bottom) { Rectangle().fill(palette.rule).frame(height: 1) }
+                    }
+                }
+                .overlay(alignment: .top) { Rectangle().fill(palette.ruleStrong).frame(height: 1) }
+                .id(Self.newRowsID)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func newRowCell(_ nr: NewRow, _ entry: GridCol) -> some View {
+        let c = entry.fullIndex
+        let col = entry.col
+        let insertable = EditViewModel.isInsertable(col)
+        if appVM.edit.editingNewCell?.id == nr.id, appVM.edit.editingNewCell?.col == c {
+            EditCellField(
+                initial: nr.values[col.name].map { CellCoercion.editorText(for: $0) } ?? "",
+                width: entry.width, height: rowHeight, zoom: zoom, palette: palette,
+                onSubmit: { text, move in submitNewRowCell(nr, entry, text: text, move: move) },
+                onNull: {
+                    if let err = appVM.edit.stageNewRowNull(id: nr.id, column: col) { appVM.errorMessage = err }
+                    appVM.edit.editingNewCell = nil; isGridFocused = true
+                },
+                onCancel: { appVM.edit.editingNewCell = nil; isGridFocused = true }
+            )
+        } else {
+            let v = nr.values[col.name]
+            Text(v.map { $0.isNull ? "NULL" : $0.rawText } ?? (insertable ? "" : "auto"))
+                .font(.system(size: 12 * zoom, design: .monospaced))
+                .foregroundColor(v == nil || v?.isNull == true ? palette.dim : palette.ink)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .frame(width: entry.width, height: rowHeight, alignment: .leading)
+                .overlay(alignment: .trailing) { Rectangle().fill(palette.rule.opacity(0.65)).frame(width: 1) }
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { if insertable { appVM.edit.editingNewCell = (id: nr.id, col: c) } }
+                .help(insertable ? "Double-click to edit · empty cells use the column default" : "Assigned by SQLite")
+                .contextMenu {
+                    if insertable {
+                        Button("Set NULL") { if let e = appVM.edit.stageNewRowNull(id: nr.id, column: col) { appVM.errorMessage = e } }
+                        Button("Set Empty String") { if let e = appVM.edit.stageNewRowCell(id: nr.id, column: col, text: "") { appVM.errorMessage = e } }
+                            .disabled(col.isNumeric)
+                        Button("Use Default") { appVM.edit.clearNewRowCell(id: nr.id, column: col) }
+                        Divider()
+                    }
+                    Button("Discard New Row") {
+                        appVM.edit.session?.buffer.deleteRow(table: nr.table, rowID: nr.id, original: [:])
+                        appVM.edit.noteBufferChanged()
+                    }
+                }
+        }
+    }
+
+    /// Stages a typed value into a new row. An empty field on an unset cell leaves the column
+    /// default alone, so Tab can pass over columns without tripping number parsing.
+    private func submitNewRowCell(_ nr: NewRow, _ entry: GridCol, text: String, move: EditCellField.Move) -> String? {
+        let cur = appVM.edit.newRows(table: nr.table).first { $0.id == nr.id } ?? nr
+        if !(text.isEmpty && cur.values[entry.col.name] == nil) {
+            if let err = appVM.edit.stageNewRowCell(id: nr.id, column: entry.col, text: text) { return err }
+        }
+        let vis = layout.filter { EditViewModel.isInsertable($0.col) }.map { $0.fullIndex }
+        if move == .right, let p = vis.firstIndex(of: entry.fullIndex), p + 1 < vis.count {
+            appVM.edit.editingNewCell = (id: nr.id, col: vis[p + 1])
+        } else {
+            appVM.edit.editingNewCell = nil
+            isGridFocused = true
+        }
+        return nil
+    }
+
     // MARK: - Helpers
 
     // MARK: - Editing (docs/BanquetEditStyle.md)
 
     /// True when the open table and page can take cell edits (rule 4).
     private var canEditPage: Bool {
-        appVM.edit.isEditing(appVM.activeDocEntry)
-            && appVM.edit.ineligibleReason(table: tableVM.tableName) == nil
-            && !tableVM.isCustomBanquetQuery
-            && tableVM.displayKind != .summary
+        appVM.edit.canEditActiveTable
     }
 
     /// Double-click / Return: open the inline editor when editing, else the inspector.
     private func activate(page: Page, row: Int, col: Int) {
         guard canEditPage, row < page.rowIDs.count, row < page.rows.count,
               col < page.columns.count, col < page.rows[row].count,
+              !appVM.edit.isDeleted(table: page.table, rowID: page.rowIDs[row]),
               EditViewModel.isCellEditable(column: page.columns[col], value: page.rows[row][col])
         else { inspect(page: page, row: row, col: col); return }
         appVM.selectedRowIndex = row
@@ -470,6 +579,41 @@ public struct VirtualizedGridView: View {
             return
         }
         advance(page: page, row: row, col: col, move: .none)
+    }
+
+    /// Single-cell paste for edit mode. False when there is nothing sensible to paste here,
+    /// so ⌘V falls back to its usual meaning.
+    private func pasteIntoSelectedCell(page: Page) -> Bool {
+        guard let sel = appVM.selectedCell, sel.row < page.rows.count, sel.row < page.rowIDs.count,
+              sel.col < page.columns.count, sel.col < page.rows[sel.row].count,
+              !page.rows[sel.row][sel.col].isPartial,
+              !appVM.edit.isDeleted(table: page.table, rowID: page.rowIDs[sel.row]),
+              EditViewModel.isCellEditable(column: page.columns[sel.col], value: page.rows[sel.row][sel.col]),
+              let text = NSPasteboard.general.string(forType: .string), !text.contains("\n") else { return false }
+        if let err = appVM.edit.stage(table: page.table, rowID: page.rowIDs[sel.row], column: page.columns[sel.col],
+                                      original: page.rows[sel.row][sel.col], text: text) {
+            appVM.errorMessage = err
+        }
+        return true
+    }
+
+    private func submitEmpty(page: Page, row: Int, col: Int) {
+        guard row < page.rowIDs.count else { return }
+        if page.rows[row][col].isPartial {
+            Task {
+                if await tableVM.resolveFullValues(row: row, cols: [col]), let fresh = tableVM.currentPage,
+                   row < fresh.rows.count, col < fresh.rows[row].count, !fresh.rows[row][col].isPartial {
+                    submitEmpty(page: fresh, row: row, col: col)
+                } else {
+                    appVM.errorMessage = "Could not load the full value of this cell to edit it."
+                }
+            }
+            return
+        }
+        if let err = appVM.edit.stageEmptyString(table: page.table, rowID: page.rowIDs[row], column: page.columns[col],
+                                                 original: page.rows[row][col]) {
+            appVM.errorMessage = err
+        }
     }
 
     private func advance(page: Page, row: Int, col: Int, move: EditCellField.Move) {
@@ -538,6 +682,15 @@ public struct VirtualizedGridView: View {
             if canEditPage, sel.col < page.columns.count,
                EditViewModel.isCellEditable(column: page.columns[sel.col], value: val) {
                 Button("Set NULL") { submitNull(page: page, row: rowIdx, col: sel.col) }
+                Button("Set Empty String") { submitEmpty(page: page, row: rowIdx, col: sel.col) }
+                    .disabled(page.columns[sel.col].isNumeric)
+                Divider()
+            }
+            if canEditPage {
+                Button("Duplicate Row") { Task { await appVM.edit.duplicateSelectedRow() } }
+                Button(appVM.edit.markedRowIDs.count > 1 ? "Delete \(appVM.edit.markedRowIDs.count) Rows" : "Delete Row") {
+                    appVM.edit.deleteSelectedRows()
+                }
                 Divider()
             }
             if let valStr = val.textValue, !val.isNull, !val.isBlob, !val.isPartial {
@@ -669,6 +822,8 @@ public struct VirtualizedGridView: View {
                 return .handled
             }
             if press.characters == "v", press.modifiers.contains(.command) {
+                // In edit mode ⌘V fills the selected cell; ⇧⌘V still pastes into the Banquet bar.
+                if canEditPage, pasteIntoSelectedCell(page: page) { return .handled }
                 appVM.pasteFromClipboard()
                 return .handled
             }
@@ -802,6 +957,8 @@ public struct CellView: View {
     /// Staged, uncommitted edit (edit mode): tinted, with the original in the tooltip.
     var isPending: Bool = false
     var originalText: String? = nil
+    /// Row staged for DELETE: struck through and tinted red until commit.
+    var isDeleted: Bool = false
 
     private var trailing: Bool {
         switch value {
@@ -816,6 +973,8 @@ public struct CellView: View {
     public var body: some View {
         content
             .font(font)
+            .strikethrough(isDeleted)
+            .opacity(isDeleted ? 0.6 : 1)
             .lineLimit(wrap ? nil : 1)
             .truncationMode(.tail)
             .padding(.horizontal, 8)
@@ -831,7 +990,8 @@ public struct CellView: View {
             }
             .background(
                 isActiveMatch ? palette.activeMatchFill
-                    : (isSelected ? palette.selectionFill : (isPending ? Color.orange.opacity(0.22) : Color.clear))
+                    : (isSelected ? palette.selectionFill
+                        : (isDeleted ? Color.red.opacity(0.16) : (isPending ? Color.orange.opacity(0.22) : Color.clear)))
             )
             .overlay(alignment: .trailing) {
                 Rectangle().fill(palette.rule.opacity(0.65)).frame(width: 1)
@@ -861,6 +1021,7 @@ public struct CellView: View {
     }
 
     private var helpText: String {
+        if isDeleted { return "row will be deleted on commit" }
         if isPending { return "pending edit · was: \(originalText ?? "")" }
         if case .textPrefix(_, let total) = value {
             return "\(total.formatted()) bytes — double-click to inspect"
