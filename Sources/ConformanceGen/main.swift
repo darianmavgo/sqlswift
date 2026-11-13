@@ -282,8 +282,14 @@ figcaption{color:var(--muted);font-size:.9rem;margin-top:6px}
 footer{color:var(--muted);font-size:.85rem;margin-top:48px;border-top:1px solid var(--line);padding-top:16px}
 """
 
-func guide(_ db: DB) -> Int32 {
-    // Training order, not the ledger's audit order: address first, then what you see, then editing.
+struct TrainingSection {
+    let id: String, title: String, blurb: String
+    let rules: [[String: String]]
+}
+
+/// What the guide and the deck both teach, in training order (not the ledger's audit order):
+/// address first, then what you see, then editing.
+func trainingSections(_ db: DB) -> [TrainingSection] {
     let order = ["url", "bar", "grid", "query", "tablelist", "dblist", "edit"]
     let blurbs = [
         "url": "A Banquet URL is a file path that keeps going: file, table, columns, rows.",
@@ -295,19 +301,30 @@ func guide(_ db: DB) -> Int32 {
         "edit": "Files open read-only. Editing is a mode you switch on.",
     ]
     let titles = Dictionary(uniqueKeysWithValues: db.rows("SELECT id, title FROM standards").map { ($0["id"]!, $0["title"]!) })
-
-    var body = "", toc = ""
-    for std in order {
-        // A rule earns a place in the guide when there is something to do (how_to) or to see (a shot).
+    return order.compactMap { std in
+        // A rule earns a place when there is something to do (how_to) or to see (a shot).
         let rules = db.rows("""
             SELECT r.id, r.title, r.text, r.status, r.note, r.how_to, r.demo_url
             FROM rules r WHERE r.standard = ? AND r.status <> 'missing'
               AND (r.how_to IS NOT NULL OR EXISTS (SELECT 1 FROM shots s WHERE s.rule_id = r.id))
             ORDER BY r.rowid
             """, [std])
-        if rules.isEmpty { continue }
-        toc += "<a href=\"#\(std)\">\(esc(titles[std] ?? std))</a>"
-        body += "<h2 id=\"\(std)\">\(esc(titles[std] ?? std))</h2>\n<p class=\"sub\">\(esc(blurbs[std] ?? ""))</p>\n"
+        return rules.isEmpty ? nil : TrainingSection(id: std, title: titles[std] ?? std, blurb: blurbs[std] ?? "", rules: rules)
+    }
+}
+
+/// Shots of a rule whose PNG has actually been captured.
+func capturedShots(_ db: DB, rule: String) -> [[String: String]] {
+    db.rows("SELECT id, caption, narration FROM shots WHERE rule_id = ? ORDER BY rowid", [rule])
+        .filter { FileManager.default.fileExists(atPath: "\(outDir)/img/\($0["id"]!).png") }
+}
+
+func guide(_ db: DB) -> Int32 {
+    var body = "", toc = ""
+    for section in trainingSections(db) {
+        let std = section.id, rules = section.rules
+        toc += "<a href=\"#\(std)\">\(esc(section.title))</a>"
+        body += "<h2 id=\"\(std)\">\(esc(section.title))</h2>\n<p class=\"sub\">\(esc(section.blurb))</p>\n"
         for r in rules {
             body += "<section class=\"step\" id=\"\(r["id"]!)\">\n<h3>\(esc(r["how_to"] ?? r["title"]!))</h3>\n"
             body += "<p class=\"rule\">\(esc(r["id"]!)) · \(esc(r["text"]!))</p>\n"
@@ -317,8 +334,7 @@ func guide(_ db: DB) -> Int32 {
             if r["status"] == "differs", let note = r["note"] {
                 body += "<p class=\"note\">Differs from the standard: \(esc(note))</p>\n"
             }
-            for s in db.rows("SELECT id, caption FROM shots WHERE rule_id = ? ORDER BY rowid", [r["id"]!])
-            where FileManager.default.fileExists(atPath: "\(outDir)/img/\(s["id"]!).png") {
+            for s in capturedShots(db, rule: r["id"]!) {
                 body += "<figure><img src=\"img/\(s["id"]!).png\" alt=\"\(esc(s["caption"]!))\" loading=\"lazy\"><figcaption>\(esc(s["caption"]!))</figcaption></figure>\n"
             }
             body += "</section>\n"
@@ -340,7 +356,7 @@ func guide(_ db: DB) -> Int32 {
     <main>
     <h1>Banquet in practice</h1>
     <p class="lede">Everything sqldoc shows you has an address. Learn to read and write that address and you can reach any view of any SQLite file in one line.</p>
-    <nav>\(toc)</nav>
+    <nav><a href="deck.html">▶ Present as slides</a>\(toc)</nav>
     \(body)
     <footer>Generated from <code>config/conformance.sql</code> by <code>make conformance-guide</code>. URLs are relative to the sqlswift repo root; <code>testdata/sample.db</code> comes from <code>sh scripts/make_testdata.sh</code>.</footer>
     </main>
@@ -364,11 +380,109 @@ func guide(_ db: DB) -> Int32 {
     return 0
 }
 
+// MARK: - deck: the same material as slides (reveal.js)
+
+/// reveal.js is loaded from cdnjs at a pinned version: it is a presentation-page asset, not a
+/// package dependency, and nothing is vendored into the repo. Presenting needs a network connection.
+let revealCDN = "https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0"
+
+let deckStyle = """
+.reveal{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.reveal h1,.reveal h2{font-family:inherit;text-transform:none;letter-spacing:-.01em;font-weight:650}
+.reveal h1{font-size:2.3em}
+.reveal h2{font-size:1.25em;margin-bottom:.45em}
+.reveal .kicker{color:#f08a54;font-size:.5em;letter-spacing:.12em;text-transform:uppercase;margin-bottom:.6em}
+.reveal .blurb{color:#b8b2a8;font-size:.85em;max-width:24em;margin:0 auto}
+.reveal .rule{color:#a09a90;font-size:.5em;margin:.3em auto;max-width:44em}
+.reveal .url{display:inline-block;background:#2a2824;color:#f3efe8;border-radius:8px;padding:.3em .7em;margin:.2em 0 .4em;font:.6em ui-monospace,SFMono-Regular,Menlo,monospace;max-width:100%;overflow-wrap:anywhere}
+.reveal .note{display:inline-block;background:#3a3018;color:#f0c674;border-radius:8px;padding:.3em .7em;font-size:.5em;max-width:44em}
+.reveal figure{margin:.3em 0 0}
+.reveal figure img{max-height:56vh;max-width:100%;border:1px solid #33302b;border-radius:8px;margin:0}
+.reveal figcaption{color:#a09a90;font-size:.5em;margin-top:.3em}
+.reveal .keys{color:#a09a90;font-size:.5em;margin-top:2em}
+.reveal kbd{border:1px solid #55504a;border-radius:5px;padding:.05em .4em;font:inherit}
+#present{position:fixed;right:14px;top:12px;z-index:40;border:1px solid #55504a;background:#201f1c;color:#ece8e1;border-radius:999px;padding:6px 14px;font:14px -apple-system,sans-serif;cursor:pointer}
+#present:hover{border-color:#f08a54;color:#f08a54}
+:fullscreen #present{display:none}
+"""
+
+func deck(_ db: DB) -> Int32 {
+    var slides = """
+        <section>
+        <p class="kicker">sqldoc</p>
+        <h1>Banquet in practice</h1>
+        <p class="blurb">Everything sqldoc shows you has an address. Learn to read and write it, and any view of any SQLite file is one line away.</p>
+        <p class="keys"><kbd>→</kbd> next · <kbd>←</kbd> back · <kbd>F</kbd> full screen · <kbd>Esc</kbd> overview · <kbd>S</kbd> speaker notes</p>
+        </section>
+
+        """
+    for section in trainingSections(db) {
+        slides += "<section id=\"\(section.id)\">\n<p class=\"kicker\">\(esc(section.title))</p>\n<h1>\(esc(section.blurb))</h1>\n</section>\n"
+        for r in section.rules {
+            let shots = capturedShots(db, rule: r["id"]!)
+            slides += "<section id=\"\(r["id"]!)\">\n<h2>\(esc(r["how_to"] ?? r["title"]!))</h2>\n"
+            if let url = r["demo_url"] { slides += "<div class=\"url\">\(esc(url))</div>\n" }
+            // With a screenshot the picture carries the slide; the rule text moves to the notes.
+            if shots.isEmpty { slides += "<p class=\"rule\">\(esc(r["text"]!))</p>\n" }
+            if r["status"] == "differs", let note = r["note"] {
+                slides += "<div class=\"note\">Differs from the standard: \(esc(note))</div>\n"
+            }
+            if let s = shots.first {
+                slides += "<figure><img src=\"img/\(s["id"]!).png\" alt=\"\(esc(s["caption"]!))\"><figcaption>\(esc(s["caption"]!))</figcaption></figure>\n"
+            }
+            let narration = shots.compactMap { $0["narration"] }.joined(separator: " ")
+            slides += "<aside class=\"notes\">\(esc(narration.isEmpty ? "" : narration + " "))[\(esc(r["id"]!))] \(esc(r["text"]!))</aside>\n</section>\n"
+        }
+    }
+    slides += "<section>\n<p class=\"kicker\">sqldoc</p>\n<h1>Every view is a link.</h1>\n<p class=\"blurb\">Step-by-step version: <a href=\"guide.html\">the guide</a>.</p>\n</section>\n"
+
+    let html = """
+    <!doctype html>
+    <html lang="en">
+    <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>sqldoc: Banquet in practice (slides)</title>
+    <link rel="stylesheet" href="\(revealCDN)/reveal.min.css">
+    <link rel="stylesheet" href="\(revealCDN)/theme/black.min.css">
+    <style>
+    \(deckStyle)
+    </style>
+    </head>
+    <body>
+    <button id="present" type="button">⛶ Present</button>
+    <div class="reveal"><div class="slides">
+    \(slides)
+    </div></div>
+    <script src="\(revealCDN)/reveal.min.js"></script>
+    <script src="\(revealCDN)/plugin/notes/notes.min.js"></script>
+    <script>
+    Reveal.initialize({
+      hash: true, slideNumber: 'c/t', progress: true, controls: true,
+      transition: 'slide', width: 1280, height: 720, margin: 0.04,
+      plugins: [RevealNotes]
+    });
+    document.getElementById('present').addEventListener('click', function () {
+      document.documentElement.requestFullscreen();
+    });
+    </script>
+    </body>
+    </html>
+
+    """
+    let path = "\(outDir)/deck.html"
+    do { try html.write(toFile: path, atomically: true, encoding: .utf8) }
+    catch { fail("cannot write \(path): \(error.localizedDescription)") }
+    print("wrote \(path)")
+    return 0
+}
+
 let args = Array(CommandLine.arguments.dropFirst())
 switch args.first {
 case "check":     exit(check(DB(dbPath)))
 case "scorecard": exit(scorecard(DB(dbPath)))
 case "shoot":     exit(shoot(DB(dbPath), only: args.dropFirst().first))
 case "guide":     exit(guide(DB(dbPath)))
-default:          fail("usage: ConformanceGen check | scorecard | shoot [id-substring] | guide")
+case "deck":      exit(deck(DB(dbPath)))
+default:          fail("usage: ConformanceGen check | scorecard | shoot [id-substring] | guide | deck")
 }

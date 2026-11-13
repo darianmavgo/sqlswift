@@ -127,7 +127,7 @@ INSERT INTO rules VALUES
  '+col sorts ascending, -col descending; orderby= does the same in the query string.',
  'conforms','A marker also names a shown column, and a hidden sort column moves to ?sort= (extra G5).',
  'Put a minus in front of a column name to sort by it, largest first.',
- 'testdata/sample.db/telemetry/-id[0:100]',NULL),
+ 'testdata/sample.db/telemetry/-temperature[0:100]',NULL),
 ('url-6','url',6,'MUST','Path equality',
  'Column!=Value in a path segment becomes a WHERE condition; where= carries complex filters.',
  'conforms','Also accepts = < > <= >= in the path (extra G4).',

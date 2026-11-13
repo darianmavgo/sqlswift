@@ -36,7 +36,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:48px;border-top:1px solid 
 <main>
 <h1>Banquet in practice</h1>
 <p class="lede">Everything sqldoc shows you has an address. Learn to read and write that address and you can reach any view of any SQLite file in one line.</p>
-<nav><a href="#url">Banquet URL Syntax</a><a href="#bar">Banquet Bar Style</a><a href="#grid">Banquet Grid Style</a><a href="#query">Banquet Query Style</a><a href="#tablelist">Banquet Table List Style</a><a href="#dblist">Banquet Collections &amp; DB List Style</a><a href="#edit">Banquet Edit Style (sqlswift, experimental)</a></nav>
+<nav><a href="deck.html">▶ Present as slides</a><a href="#url">Banquet URL Syntax</a><a href="#bar">Banquet Bar Style</a><a href="#grid">Banquet Grid Style</a><a href="#query">Banquet Query Style</a><a href="#tablelist">Banquet Table List Style</a><a href="#dblist">Banquet Collections &amp; DB List Style</a><a href="#edit">Banquet Edit Style (sqlswift, experimental)</a></nav>
 <h2 id="url">Banquet URL Syntax</h2>
 <p class="sub">A Banquet URL is a file path that keeps going: file, table, columns, rows.</p>
 <section class="step" id="url-1">
@@ -64,7 +64,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:48px;border-top:1px solid 
 <section class="step" id="url-5">
 <h3>Put a minus in front of a column name to sort by it, largest first.</h3>
 <p class="rule">url-5 · +col sorts ascending, -col descending; orderby= does the same in the query string.</p>
-<div class="url"><code>testdata/sample.db/telemetry/-id[0:100]</code><button type="button" data-copy="testdata/sample.db/telemetry/-id[0:100]">Copy</button></div>
+<div class="url"><code>testdata/sample.db/telemetry/-temperature[0:100]</code><button type="button" data-copy="testdata/sample.db/telemetry/-temperature[0:100]">Copy</button></div>
 <figure><img src="img/url-sort.png" alt="A minus sign sorts descending." loading="lazy"><figcaption>A minus sign sorts descending.</figcaption></figure>
 </section>
 <section class="step" id="url-6">

@@ -10,7 +10,7 @@ export SWIFTPM_MODULECACHE_OVERRIDE ?= /tmp/swiftpm-cache
 SWIFT ?= /usr/bin/swift
 SWIFT_FLAGS ?= --disable-sandbox
 
-.PHONY: all build release test clean install install-cli install-app uninstall app bench config generate icons config-check buildinfo lsclean lslist uilog uistate ui-test ui-e2e conformance-db conformance-check conformance-shots conformance-guide
+.PHONY: all build release test clean install install-cli install-app uninstall app bench config generate icons config-check buildinfo lsclean lslist uilog uistate ui-test ui-e2e conformance-db conformance-check conformance-shots conformance-guide conformance-deck
 
 LSREGISTER = /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 BUNDLE_ID  = com.mavgo.sqlswift
@@ -181,6 +181,10 @@ conformance-shots: $(CONFORMANCE_DB)
 # The training page, docs/conformance/guide.html.
 conformance-guide: $(CONFORMANCE_DB)
 	@$(SWIFT) run $(SWIFT_FLAGS) ConformanceGen guide
+
+# The same material as a slide deck (reveal.js from a CDN), docs/conformance/deck.html.
+conformance-deck: $(CONFORMANCE_DB)
+	@$(SWIFT) run $(SWIFT_FLAGS) ConformanceGen deck
 
 clean:
 	@rm -rf .build bin testdata/*.db

@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sqldoc: Banquet in practice (slides)</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reveal.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/theme/black.min.css">
+<style>
+.reveal{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.reveal h1,.reveal h2{font-family:inherit;text-transform:none;letter-spacing:-.01em;font-weight:650}
+.reveal h1{font-size:2.3em}
+.reveal h2{font-size:1.25em;margin-bottom:.45em}
+.reveal .kicker{color:#f08a54;font-size:.5em;letter-spacing:.12em;text-transform:uppercase;margin-bottom:.6em}
+.reveal .blurb{color:#b8b2a8;font-size:.85em;max-width:24em;margin:0 auto}
+.reveal .rule{color:#a09a90;font-size:.5em;margin:.3em auto;max-width:44em}
+.reveal .url{display:inline-block;background:#2a2824;color:#f3efe8;border-radius:8px;padding:.3em .7em;margin:.2em 0 .4em;font:.6em ui-monospace,SFMono-Regular,Menlo,monospace;max-width:100%;overflow-wrap:anywhere}
+.reveal .note{display:inline-block;background:#3a3018;color:#f0c674;border-radius:8px;padding:.3em .7em;font-size:.5em;max-width:44em}
+.reveal figure{margin:.3em 0 0}
+.reveal figure img{max-height:56vh;max-width:100%;border:1px solid #33302b;border-radius:8px;margin:0}
+.reveal figcaption{color:#a09a90;font-size:.5em;margin-top:.3em}
+.reveal .keys{color:#a09a90;font-size:.5em;margin-top:2em}
+.reveal kbd{border:1px solid #55504a;border-radius:5px;padding:.05em .4em;font:inherit}
+#present{position:fixed;right:14px;top:12px;z-index:40;border:1px solid #55504a;background:#201f1c;color:#ece8e1;border-radius:999px;padding:6px 14px;font:14px -apple-system,sans-serif;cursor:pointer}
+#present:hover{border-color:#f08a54;color:#f08a54}
+:fullscreen #present{display:none}
+</style>
+</head>
+<body>
+<button id="present" type="button">⛶ Present</button>
+<div class="reveal"><div class="slides">
+<section>
+<p class="kicker">sqldoc</p>
+<h1>Banquet in practice</h1>
+<p class="blurb">Everything sqldoc shows you has an address. Learn to read and write it, and any view of any SQLite file is one line away.</p>
+<p class="keys"><kbd>→</kbd> next · <kbd>←</kbd> back · <kbd>F</kbd> full screen · <kbd>Esc</kbd> overview · <kbd>S</kbd> speaker notes</p>
+</section>
+<section id="url">
+<p class="kicker">Banquet URL Syntax</p>
+<h1>A Banquet URL is a file path that keeps going: file, table, columns, rows.</h1>
+</section>
+<section id="url-1">
+<h2>Separate file, table and column with semicolons when a path is ambiguous.</h2>
+<div class="url">testdata/sample.db;telemetry;device_id</div>
+<p class="rule">dataset;table;column with semicolons is parsed without guessing.</p>
+<aside class="notes">[url-1] dataset;table;column with semicolons is parsed without guessing.</aside>
+</section>
+<section id="url-2">
+<h2>Type a path the way you would in Finder: file, then table, then columns.</h2>
+<div class="url">testdata/sample.db/telemetry/device_id,temperature</div>
+<figure><img src="img/url-familiar.png" alt="A path, a table and two columns: nothing else to learn."><figcaption>A path, a table and two columns: nothing else to learn.</figcaption></figure>
+<aside class="notes">A Banquet URL reads like a file path. File, table, columns. [url-2] dataset/table/column with slashes; the dataset ends at the segment with a known file extension.</aside>
+</section>
+<section id="url-3">
+<h2>Name just the table to see every column.</h2>
+<div class="url">testdata/sample.db/telemetry</div>
+<p class="rule">No columns means SELECT *; a one-table file may omit the table name.</p>
+<aside class="notes">[url-3] No columns means SELECT *; a one-table file may omit the table name.</aside>
+</section>
+<section id="url-4">
+<h2>Add [0:100] to see the first hundred rows.</h2>
+<div class="url">testdata/sample.db/telemetry[0:100]</div>
+<figure><img src="img/url-slice.png" alt="Python-style slice: rows 10 to 20."><figcaption>Python-style slice: rows 10 to 20.</figcaption></figure>
+<aside class="notes">Square brackets pick the rows, the way a Python slice does. [url-4] [start:end] in the path becomes OFFSET start, LIMIT end-start.</aside>
+</section>
+<section id="url-5">
+<h2>Put a minus in front of a column name to sort by it, largest first.</h2>
+<div class="url">testdata/sample.db/telemetry/-temperature[0:100]</div>
+<figure><img src="img/url-sort.png" alt="A minus sign sorts descending."><figcaption>A minus sign sorts descending.</figcaption></figure>
+<aside class="notes">Put a minus in front of a column and the table sorts by it, largest first. [url-5] +col sorts ascending, -col descending; orderby= does the same in the query string.</aside>
+</section>
+<section id="url-6">
+<h2>Write status!=active after the table to leave those rows out.</h2>
+<div class="url">testdata/sample.db/devices/status!=active</div>
+<p class="rule">Column!=Value in a path segment becomes a WHERE condition; where= carries complex filters.</p>
+<aside class="notes">[url-6] Column!=Value in a path segment becomes a WHERE condition; where= carries complex filters.</aside>
+</section>
+<section id="url-6q">
+<h2>Type ?id&gt;6000 after the table to filter without writing where=.</h2>
+<div class="url">testdata/sample.db/telemetry?id&gt;6000</div>
+<figure><img src="img/url-query-where.png" alt="Anything after ? is a filter."><figcaption>Anything after ? is a filter.</figcaption></figure>
+<aside class="notes">Add a question mark and a condition. No where keyword needed. [url-6q] Any non-reserved ?parameter with a comparison operator is a WHERE condition; several are ANDed.</aside>
+</section>
+<section id="url-7">
+<h2>Type a folder path to list every database in it.</h2>
+<div class="url">testdata/</div>
+<figure><img src="img/url-collection.png" alt="A folder is a URL too: every database under it."><figcaption>A folder is a URL too: every database under it.</figcaption></figure>
+<aside class="notes">Point it at a folder and you get a catalog of every database inside. [url-7] A path with no recognised extension names a container; the host answers with a catalog of the datasets under it.</aside>
+</section>
+<section id="bar">
+<p class="kicker">Banquet Bar Style</p>
+<h1>The bar at the top is the only control you need. Whatever you see has a URL.</h1>
+</section>
+<section id="bar-1">
+<h2>Click the bar or press ⌘L and type.</h2>
+<div class="url">testdata/sample.db/telemetry</div>
+<p class="rule">The bar is an editable text field at the top of the window.</p>
+<aside class="notes">[bar-1] The bar is an editable text field at the top of the window.</aside>
+</section>
+<section id="bar-2">
+<h2>Start typing as soon as the app opens.</h2>
+<p class="rule">The bar is focused on launch and after completing an action.</p>
+<div class="note">Differs from the standard: Focused on launch and with ⌘L. Not refocused after a submit, so the grid keeps arrow keys and ⌘F.</div>
+<aside class="notes">[bar-2] The bar is focused on launch and after completing an action.</aside>
+</section>
+<section id="bar-3">
+<h2>Sort or filter in the grid and watch the bar rewrite itself; copy it to share the view.</h2>
+<div class="url">testdata/sample.db/telemetry/-id</div>
+<figure><img src="img/bar-reflect.png" alt="The bar rewrites itself as you click."><figcaption>The bar rewrites itself as you click.</figcaption></figure>
+<aside class="notes">Sort and filter with the mouse. The bar keeps up, so the view is always a link you can copy. [bar-3] The bar always shows the canonical Banquet URL of the current view.</aside>
+</section>
+<section id="bar-4">
+<h2>Edit the URL and press Return.</h2>
+<p class="rule">Return evaluates the typed URL, command or relative clause and syncs the bar to the result.</p>
+<aside class="notes">[bar-4] Return evaluates the typed URL, command or relative clause and syncs the bar to the result.</aside>
+</section>
+<section id="bar-6">
+<h2>Press ↑ in the bar to bring back the last URL you ran.</h2>
+<p class="rule">↑ recalls earlier evaluated URLs; ↓ walks forward and ends at the unsubmitted draft.</p>
+<aside class="notes">[bar-6] ↑ recalls earlier evaluated URLs; ↓ walks forward and ends at the unsubmitted draft.</aside>
+</section>
+<section id="bar-7">
+<h2>Type the start of a table name and press Tab.</h2>
+<p class="rule">Tab completes a partial table or column name from the open schema.</p>
+<aside class="notes">[bar-7] Tab completes a partial table or column name from the open schema.</aside>
+</section>
+<section id="bar-8">
+<h2>Type a few letters and pick from the list under the bar.</h2>
+<figure><img src="img/bar-suggest.png" alt="Typing &quot;dev&quot; offers the devices table."><figcaption>Typing &quot;dev&quot; offers the devices table.</figcaption></figure>
+<aside class="notes">Start typing and the bar suggests tables, columns and places you have been. [bar-8] Typing opens a ranked dropdown of tables, columns, history and databases; ↑/↓ move, Tab completes, Return runs, Esc closes.</aside>
+</section>
+<section id="bar-9">
+<h2>Press ⌘[ to go back to the previous view, ⌘] to go forward.</h2>
+<div class="note">Differs from the standard: The behaviour is implemented; the keys are ⌘[ and ⌘] (extra A5).</div>
+<figure><img src="img/bar-back.png" alt="Back returns to the previous view."><figcaption>Back returns to the previous view.</figcaption></figure>
+<aside class="notes">Back and forward work like a browser. [bar-9] Alt+← / Alt+→ (or Ctrl+[ / Ctrl+]) walk the session stack; a new visit after going back drops forward history.</aside>
+</section>
+<section id="grid">
+<p class="kicker">Banquet Grid Style</p>
+<h1>How values are drawn once you have a result.</h1>
+</section>
+<section id="grid-1">
+<h2>Long text is shortened in the grid; open the inspector to read all of it.</h2>
+<div class="url">testdata/sample.db/events</div>
+<p class="rule">Rows are one line high; text past about 120 characters is cut with an ellipsis and newlines become spaces.</p>
+<div class="note">Differs from the standard: Newlines are flattened, but the cut is at text.cell_display_max_chars = 400, not 120.</div>
+<aside class="notes">[grid-1] Rows are one line high; text past about 120 characters is cut with an ellipsis and newlines become spaces.</aside>
+</section>
+<section id="grid-2">
+<h2>Binary columns show their size instead of garbage.</h2>
+<div class="url">testdata/sample.db/telemetry/id,raw_payload[0:100]</div>
+<figure><img src="img/grid-blob.png" alt="Binary data shows its size, never garbage."><figcaption>Binary data shows its size, never garbage.</figcaption></figure>
+<aside class="notes">[grid-2] Binary values are never printed raw; they show as &lt;BLOB: n bytes&gt;.</aside>
+</section>
+<section id="grid-3a">
+<h2>Switch the display to raw to see values exactly as stored.</h2>
+<div class="url">testdata/sample.db/telemetry</div>
+<p class="rule">Values are formatted for reading (dates from epochs, thousands separators); the raw value stays reachable.</p>
+<aside class="notes">[grid-3a] Values are formatted for reading (dates from epochs, thousands separators); the raw value stays reachable.</aside>
+</section>
+<section id="grid-4">
+<h2>Zero rows</h2>
+<div class="url">testdata/sample.db/devices/status=NOPE</div>
+<figure><img src="img/grid-empty.png" alt="No match says so, and keeps the headers."><figcaption>No match says so, and keeps the headers.</figcaption></figure>
+<aside class="notes">[grid-4] An empty result shows &quot;No results found&quot;, not a bare grid.</aside>
+</section>
+<section id="query">
+<p class="kicker">Banquet Query Style</p>
+<h1>Which columns you see first, and which are tucked away.</h1>
+</section>
+<section id="query-1">
+<h2>Primary key first</h2>
+<figure><img src="img/query-trim.png" alt="Trim: key first, noise hidden."><figcaption>Trim: key first, noise hidden.</figcaption></figure>
+<aside class="notes">Trim view puts the key first and hides columns you rarely need. [query-1] The primary key leads, in key order.</aside>
+</section>
+<section id="query-8">
+<h2>Wide tables open trimmed; switch to raw to see every column.</h2>
+<figure><img src="img/query-raw.png" alt="Raw: every column, as stored."><figcaption>Raw: every column, as stored.</figcaption></figure>
+<aside class="notes">[query-8] No cap normally; past about 40 surviving columns trim keeps the first 40. Raw is never capped.</aside>
+</section>
+<section id="tablelist">
+<p class="kicker">Banquet Table List Style</p>
+<h1>A whole database on one page.</h1>
+</section>
+<section id="tablelist-1">
+<h2>Type &lt;file&gt;/tables to see every table at once.</h2>
+<div class="url">testdata/sample.db/tables</div>
+<p class="rule">The table list reuses Grid Style.</p>
+<aside class="notes">[tablelist-1] The table list reuses Grid Style.</aside>
+</section>
+<section id="dblist">
+<p class="kicker">Banquet Collections &amp; DB List Style</p>
+<h1>A folder of databases is browsable too.</h1>
+</section>
+<section id="dblist-grammar">
+<h2>Add -size_bytes after a folder path to sort its databases by size.</h2>
+<div class="url">testdata/-size_bytes</div>
+<p class="rule">The container runs to the first reserved catalog table (databases, tables) or clause-like segment; the rest is ordinary grammar applied to the catalog.</p>
+<aside class="notes">[dblist-grammar] The container runs to the first reserved catalog table (databases, tables) or clause-like segment; the rest is ordinary grammar applied to the catalog.</aside>
+</section>
+<section id="dblist-3">
+<h2>Click a database in the list to open it.</h2>
+<p class="rule">Each row opens its dataset through its open path.</p>
+<div class="note">Differs from the standard: Rows open the database when clicked, but there is no open column carrying a Banquet path.</div>
+<aside class="notes">[dblist-3] Each row opens its dataset through its open path.</aside>
+</section>
+<section id="edit">
+<p class="kicker">Banquet Edit Style (sqlswift, experimental)</p>
+<h1>Files open read-only. Editing is a mode you switch on.</h1>
+</section>
+<section id="edit-1">
+<h2>Press ⌥⌘E to start editing.</h2>
+<p class="rule">Files open read-only; edit mode never starts from a URL, a paste or a drop.</p>
+<aside class="notes">[edit-1] Files open read-only; edit mode never starts from a URL, a paste or a drop.</aside>
+</section>
+<section id="edit-3">
+<h2>Visible state</h2>
+<figure><img src="img/edit-session.png" alt="Editing is opt-in, staged, and never changes the URL."><figcaption>Editing is opt-in, staged, and never changes the URL.</figcaption></figure>
+<aside class="notes">Editing is a deliberate mode. Changes are staged and tinted until you commit. [edit-3] An EDIT badge shows while editing, with the pending count when above zero.</aside>
+</section>
+<section id="edit-5">
+<h2>Double-click a cell, type, press Return.</h2>
+<p class="rule">Double-click or Return opens an inline editor on the raw value; Return stages and moves down, Tab right, Esc cancels.</p>
+<aside class="notes">[edit-5] Double-click or Return opens an inline editor on the raw value; Return stages and moves down, Tab right, Esc cancels.</aside>
+</section>
+<section id="edit-8">
+<h2>Press ⌘S to write your changes, or Revert to throw them away.</h2>
+<p class="rule">Commit writes everything in one transaction and rolls back whole on any failure; Revert discards the buffer.</p>
+<aside class="notes">[edit-8] Commit writes everything in one transaction and rolls back whole on any failure; Revert discards the buffer.</aside>
+</section>
+<section>
+<p class="kicker">sqldoc</p>
+<h1>Every view is a link.</h1>
+<p class="blurb">Step-by-step version: <a href="guide.html">the guide</a>.</p>
+</section>
+
+</div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reveal.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/plugin/notes/notes.min.js"></script>
+<script>
+Reveal.initialize({
+  hash: true, slideNumber: 'c/t', progress: true, controls: true,
+  transition: 'slide', width: 1280, height: 720, margin: 0.04,
+  plugins: [RevealNotes]
+});
+document.getElementById('present').addEventListener('click', function () {
+  document.documentElement.requestFullscreen();
+});
+</script>
+</body>
+</html>
