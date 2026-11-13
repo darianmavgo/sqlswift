@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sqldoc guide: Banquet in practice</title>
+<style>
+:root{--bg:#faf8f5;--card:#fff;--ink:#1f1d1a;--muted:#6b665e;--line:#e4dfd6;--accent:#d9622b;--code:#f1ede6;--warn:#8a5a00;--warnbg:#fff4d6}
+@media (prefers-color-scheme:dark){:root{--bg:#171614;--card:#201f1c;--ink:#ece8e1;--muted:#a09a90;--line:#33302b;--accent:#f08a54;--code:#2a2824;--warn:#f0c674;--warnbg:#3a3018}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:920px;margin:0 auto;padding:40px 16px 80px}
+h1{font-size:2.1rem;line-height:1.15;margin:0 0 8px}
+.lede{color:var(--muted);font-size:1.1rem;margin:0 0 20px;max-width:60ch}
+nav{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 36px}
+nav a{color:var(--ink);text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:.9rem}
+nav a:hover{border-color:var(--accent);color:var(--accent)}
+h2{font-size:1.35rem;margin:48px 0 4px;padding-top:8px}
+.sub{color:var(--muted);margin:0 0 16px;font-size:.95rem}
+.step{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 18px 16px;margin:0 0 16px}
+.step h3{font-size:1.05rem;margin:0 0 8px}
+.step p{margin:6px 0}
+.url{display:flex;align-items:center;gap:8px;margin:10px 0}
+.url code{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;background:var(--code);border-radius:6px;padding:7px 10px;font:14px ui-monospace,SFMono-Regular,Menlo,monospace}
+.url button{flex:none;border:1px solid var(--line);background:none;color:var(--muted);border-radius:6px;padding:6px 10px;font:inherit;font-size:.85rem;cursor:pointer}
+.url button:hover{color:var(--accent);border-color:var(--accent)}
+figure{margin:12px 0 0}
+figure img{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:8px}
+figcaption{color:var(--muted);font-size:.9rem;margin-top:6px}
+.rule{color:var(--muted);font-size:.85rem}
+.note{background:var(--warnbg);color:var(--warn);border-radius:6px;padding:6px 10px;font-size:.9rem}
+footer{color:var(--muted);font-size:.85rem;margin-top:48px;border-top:1px solid var(--line);padding-top:16px}
+</style>
+</head>
+<body>
+<main>
+<h1>Banquet in practice</h1>
+<p class="lede">Everything sqldoc shows you has an address. Learn to read and write that address and you can reach any view of any SQLite file in one line.</p>
+<nav><a href="#url">Banquet URL Syntax</a><a href="#bar">Banquet Bar Style</a><a href="#grid">Banquet Grid Style</a><a href="#query">Banquet Query Style</a><a href="#tablelist">Banquet Table List Style</a><a href="#dblist">Banquet Collections &amp; DB List Style</a><a href="#edit">Banquet Edit Style (sqlswift, experimental)</a></nav>
+<h2 id="url">Banquet URL Syntax</h2>
+<p class="sub">A Banquet URL is a file path that keeps going: file, table, columns, rows.</p>
+<section class="step" id="url-1">
+<h3>Separate file, table and column with semicolons when a path is ambiguous.</h3>
+<p class="rule">url-1 · dataset;table;column with semicolons is parsed without guessing.</p>
+<div class="url"><code>testdata/sample.db;telemetry;device_id</code><button type="button" data-copy="testdata/sample.db;telemetry;device_id">Copy</button></div>
+</section>
+<section class="step" id="url-2">
+<h3>Type a path the way you would in Finder: file, then table, then columns.</h3>
+<p class="rule">url-2 · dataset/table/column with slashes; the dataset ends at the segment with a known file extension.</p>
+<div class="url"><code>testdata/sample.db/telemetry/device_id,temperature</code><button type="button" data-copy="testdata/sample.db/telemetry/device_id,temperature">Copy</button></div>
+<figure><img src="img/url-familiar.png" alt="A path, a table and two columns: nothing else to learn." loading="lazy"><figcaption>A path, a table and two columns: nothing else to learn.</figcaption></figure>
+</section>
+<section class="step" id="url-3">
+<h3>Name just the table to see every column.</h3>
+<p class="rule">url-3 · No columns means SELECT *; a one-table file may omit the table name.</p>
+<div class="url"><code>testdata/sample.db/telemetry</code><button type="button" data-copy="testdata/sample.db/telemetry">Copy</button></div>
+</section>
+<section class="step" id="url-4">
+<h3>Add [0:100] to see the first hundred rows.</h3>
+<p class="rule">url-4 · [start:end] in the path becomes OFFSET start, LIMIT end-start.</p>
+<div class="url"><code>testdata/sample.db/telemetry[0:100]</code><button type="button" data-copy="testdata/sample.db/telemetry[0:100]">Copy</button></div>
+<figure><img src="img/url-slice.png" alt="Python-style slice: rows 10 to 20." loading="lazy"><figcaption>Python-style slice: rows 10 to 20.</figcaption></figure>
+</section>
+<section class="step" id="url-5">
+<h3>Put a minus in front of a column name to sort by it, largest first.</h3>
+<p class="rule">url-5 · +col sorts ascending, -col descending; orderby= does the same in the query string.</p>
+<div class="url"><code>testdata/sample.db/telemetry/-id[0:100]</code><button type="button" data-copy="testdata/sample.db/telemetry/-id[0:100]">Copy</button></div>
+<figure><img src="img/url-sort.png" alt="A minus sign sorts descending." loading="lazy"><figcaption>A minus sign sorts descending.</figcaption></figure>
+</section>
+<section class="step" id="url-6">
+<h3>Write status!=active after the table to leave those rows out.</h3>
+<p class="rule">url-6 · Column!=Value in a path segment becomes a WHERE condition; where= carries complex filters.</p>
+<div class="url"><code>testdata/sample.db/devices/status!=active</code><button type="button" data-copy="testdata/sample.db/devices/status!=active">Copy</button></div>
+</section>
+<section class="step" id="url-6q">
+<h3>Type ?id&gt;6000 after the table to filter without writing where=.</h3>
+<p class="rule">url-6q · Any non-reserved ?parameter with a comparison operator is a WHERE condition; several are ANDed.</p>
+<div class="url"><code>testdata/sample.db/telemetry?id&gt;6000</code><button type="button" data-copy="testdata/sample.db/telemetry?id&gt;6000">Copy</button></div>
+<figure><img src="img/url-query-where.png" alt="Anything after ? is a filter." loading="lazy"><figcaption>Anything after ? is a filter.</figcaption></figure>
+</section>
+<section class="step" id="url-7">
+<h3>Type a folder path to list every database in it.</h3>
+<p class="rule">url-7 · A path with no recognised extension names a container; the host answers with a catalog of the datasets under it.</p>
+<div class="url"><code>testdata/</code><button type="button" data-copy="testdata/">Copy</button></div>
+<figure><img src="img/url-collection.png" alt="A folder is a URL too: every database under it." loading="lazy"><figcaption>A folder is a URL too: every database under it.</figcaption></figure>
+</section>
+<h2 id="bar">Banquet Bar Style</h2>
+<p class="sub">The bar at the top is the only control you need. Whatever you see has a URL.</p>
+<section class="step" id="bar-1">
+<h3>Click the bar or press ⌘L and type.</h3>
+<p class="rule">bar-1 · The bar is an editable text field at the top of the window.</p>
+<div class="url"><code>testdata/sample.db/telemetry</code><button type="button" data-copy="testdata/sample.db/telemetry">Copy</button></div>
+</section>
+<section class="step" id="bar-2">
+<h3>Start typing as soon as the app opens.</h3>
+<p class="rule">bar-2 · The bar is focused on launch and after completing an action.</p>
+<p class="note">Differs from the standard: Focused on launch and with ⌘L. Not refocused after a submit, so the grid keeps arrow keys and ⌘F.</p>
+</section>
+<section class="step" id="bar-3">
+<h3>Sort or filter in the grid and watch the bar rewrite itself; copy it to share the view.</h3>
+<p class="rule">bar-3 · The bar always shows the canonical Banquet URL of the current view.</p>
+<div class="url"><code>testdata/sample.db/telemetry/-id</code><button type="button" data-copy="testdata/sample.db/telemetry/-id">Copy</button></div>
+<figure><img src="img/bar-reflect.png" alt="The bar rewrites itself as you click." loading="lazy"><figcaption>The bar rewrites itself as you click.</figcaption></figure>
+</section>
+<section class="step" id="bar-4">
+<h3>Edit the URL and press Return.</h3>
+<p class="rule">bar-4 · Return evaluates the typed URL, command or relative clause and syncs the bar to the result.</p>
+</section>
+<section class="step" id="bar-6">
+<h3>Press ↑ in the bar to bring back the last URL you ran.</h3>
+<p class="rule">bar-6 · ↑ recalls earlier evaluated URLs; ↓ walks forward and ends at the unsubmitted draft.</p>
+</section>
+<section class="step" id="bar-7">
+<h3>Type the start of a table name and press Tab.</h3>
+<p class="rule">bar-7 · Tab completes a partial table or column name from the open schema.</p>
+</section>
+<section class="step" id="bar-8">
+<h3>Type a few letters and pick from the list under the bar.</h3>
+<p class="rule">bar-8 · Typing opens a ranked dropdown of tables, columns, history and databases; ↑/↓ move, Tab completes, Return runs, Esc closes.</p>
+<figure><img src="img/bar-suggest.png" alt="Typing &quot;dev&quot; offers the devices table." loading="lazy"><figcaption>Typing &quot;dev&quot; offers the devices table.</figcaption></figure>
+</section>
+<section class="step" id="bar-9">
+<h3>Press ⌘[ to go back to the previous view, ⌘] to go forward.</h3>
+<p class="rule">bar-9 · Alt+← / Alt+→ (or Ctrl+[ / Ctrl+]) walk the session stack; a new visit after going back drops forward history.</p>
+<p class="note">Differs from the standard: The behaviour is implemented; the keys are ⌘[ and ⌘] (extra A5).</p>
+<figure><img src="img/bar-back.png" alt="Back returns to the previous view." loading="lazy"><figcaption>Back returns to the previous view.</figcaption></figure>
+</section>
+<h2 id="grid">Banquet Grid Style</h2>
+<p class="sub">How values are drawn once you have a result.</p>
+<section class="step" id="grid-1">
+<h3>Long text is shortened in the grid; open the inspector to read all of it.</h3>
+<p class="rule">grid-1 · Rows are one line high; text past about 120 characters is cut with an ellipsis and newlines become spaces.</p>
+<div class="url"><code>testdata/sample.db/events</code><button type="button" data-copy="testdata/sample.db/events">Copy</button></div>
+<p class="note">Differs from the standard: Newlines are flattened, but the cut is at text.cell_display_max_chars = 400, not 120.</p>
+</section>
+<section class="step" id="grid-2">
+<h3>Binary columns show their size instead of garbage.</h3>
+<p class="rule">grid-2 · Binary values are never printed raw; they show as &lt;BLOB: n bytes&gt;.</p>
+<div class="url"><code>testdata/sample.db/telemetry/id,raw_payload[0:100]</code><button type="button" data-copy="testdata/sample.db/telemetry/id,raw_payload[0:100]">Copy</button></div>
+<figure><img src="img/grid-blob.png" alt="Binary data shows its size, never garbage." loading="lazy"><figcaption>Binary data shows its size, never garbage.</figcaption></figure>
+</section>
+<section class="step" id="grid-3a">
+<h3>Switch the display to raw to see values exactly as stored.</h3>
+<p class="rule">grid-3a · Values are formatted for reading (dates from epochs, thousands separators); the raw value stays reachable.</p>
+<div class="url"><code>testdata/sample.db/telemetry</code><button type="button" data-copy="testdata/sample.db/telemetry">Copy</button></div>
+</section>
+<section class="step" id="grid-4">
+<h3>Zero rows</h3>
+<p class="rule">grid-4 · An empty result shows &quot;No results found&quot;, not a bare grid.</p>
+<div class="url"><code>testdata/sample.db/devices/status=NOPE</code><button type="button" data-copy="testdata/sample.db/devices/status=NOPE">Copy</button></div>
+<figure><img src="img/grid-empty.png" alt="No match says so, and keeps the headers." loading="lazy"><figcaption>No match says so, and keeps the headers.</figcaption></figure>
+</section>
+<h2 id="query">Banquet Query Style</h2>
+<p class="sub">Which columns you see first, and which are tucked away.</p>
+<section class="step" id="query-1">
+<h3>Primary key first</h3>
+<p class="rule">query-1 · The primary key leads, in key order.</p>
+<figure><img src="img/query-trim.png" alt="Trim: key first, noise hidden." loading="lazy"><figcaption>Trim: key first, noise hidden.</figcaption></figure>
+</section>
+<section class="step" id="query-8">
+<h3>Wide tables open trimmed; switch to raw to see every column.</h3>
+<p class="rule">query-8 · No cap normally; past about 40 surviving columns trim keeps the first 40. Raw is never capped.</p>
+<figure><img src="img/query-raw.png" alt="Raw: every column, as stored." loading="lazy"><figcaption>Raw: every column, as stored.</figcaption></figure>
+</section>
+<h2 id="tablelist">Banquet Table List Style</h2>
+<p class="sub">A whole database on one page.</p>
+<section class="step" id="tablelist-1">
+<h3>Type &lt;file&gt;/tables to see every table at once.</h3>
+<p class="rule">tablelist-1 · The table list reuses Grid Style.</p>
+<div class="url"><code>testdata/sample.db/tables</code><button type="button" data-copy="testdata/sample.db/tables">Copy</button></div>
+</section>
+<h2 id="dblist">Banquet Collections &amp; DB List Style</h2>
+<p class="sub">A folder of databases is browsable too.</p>
+<section class="step" id="dblist-grammar">
+<h3>Add -size_bytes after a folder path to sort its databases by size.</h3>
+<p class="rule">dblist-grammar · The container runs to the first reserved catalog table (databases, tables) or clause-like segment; the rest is ordinary grammar applied to the catalog.</p>
+<div class="url"><code>testdata/-size_bytes</code><button type="button" data-copy="testdata/-size_bytes">Copy</button></div>
+</section>
+<section class="step" id="dblist-3">
+<h3>Click a database in the list to open it.</h3>
+<p class="rule">dblist-3 · Each row opens its dataset through its open path.</p>
+<p class="note">Differs from the standard: Rows open the database when clicked, but there is no open column carrying a Banquet path.</p>
+</section>
+<h2 id="edit">Banquet Edit Style (sqlswift, experimental)</h2>
+<p class="sub">Files open read-only. Editing is a mode you switch on.</p>
+<section class="step" id="edit-1">
+<h3>Press ⌥⌘E to start editing.</h3>
+<p class="rule">edit-1 · Files open read-only; edit mode never starts from a URL, a paste or a drop.</p>
+</section>
+<section class="step" id="edit-3">
+<h3>Visible state</h3>
+<p class="rule">edit-3 · An EDIT badge shows while editing, with the pending count when above zero.</p>
+<figure><img src="img/edit-session.png" alt="Editing is opt-in, staged, and never changes the URL." loading="lazy"><figcaption>Editing is opt-in, staged, and never changes the URL.</figcaption></figure>
+</section>
+<section class="step" id="edit-5">
+<h3>Double-click a cell, type, press Return.</h3>
+<p class="rule">edit-5 · Double-click or Return opens an inline editor on the raw value; Return stages and moves down, Tab right, Esc cancels.</p>
+</section>
+<section class="step" id="edit-8">
+<h3>Press ⌘S to write your changes, or Revert to throw them away.</h3>
+<p class="rule">edit-8 · Commit writes everything in one transaction and rolls back whole on any failure; Revert discards the buffer.</p>
+</section>
+
+<footer>Generated from <code>config/conformance.sql</code> by <code>make conformance-guide</code>. URLs are relative to the sqlswift repo root; <code>testdata/sample.db</code> comes from <code>sh scripts/make_testdata.sh</code>.</footer>
+</main>
+<script>
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('button[data-copy]');
+  if (!b) return;
+  navigator.clipboard.writeText(b.dataset.copy).then(function () {
+    b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1200);
+  });
+});
+</script>
+</body>
+</html>

@@ -52,6 +52,13 @@ let package = Package(
             path: "Sources/ConfigGen",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // Dev-time only: checks and reports on docs/conformance/conformance.db.
+        .executableTarget(
+            name: "ConformanceGen",
+            dependencies: [],
+            path: "Sources/ConformanceGen",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .executableTarget(
             name: "SQLDocTestsRunner",
             dependencies: ["SQLDocCore"],

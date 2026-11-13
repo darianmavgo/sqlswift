@@ -10,7 +10,7 @@ export SWIFTPM_MODULECACHE_OVERRIDE ?= /tmp/swiftpm-cache
 SWIFT ?= /usr/bin/swift
 SWIFT_FLAGS ?= --disable-sandbox
 
-.PHONY: all build release test clean install install-cli install-app uninstall app bench config generate icons config-check buildinfo lsclean lslist uilog uistate ui-test ui-e2e
+.PHONY: all build release test clean install install-cli install-app uninstall app bench config generate icons config-check buildinfo lsclean lslist uilog uistate ui-test ui-e2e conformance-db conformance-check conformance-shots conformance-guide
 
 LSREGISTER = /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 BUNDLE_ID  = com.mavgo.sqlswift
@@ -55,7 +55,7 @@ icons: $(CONFIG_DB)
 # CI guard: regenerate from the database and fail if any output is stale.
 # BuildInfo.swift is excluded — it is stamped from git, not from the config DB.
 config-check: generate
-	@git diff --exit-code -- $(CONFIG_DB) config/ '$(GENERATED_DIR)/*.swift' ':!$(BUILDINFO)' || \
+	@git diff --exit-code -- $(CONFIG_DB) config/ '$(GENERATED_DIR)/*.swift' ':!$(BUILDINFO)' ':!config/conformance.sql' || \
 		(echo "config output is stale — run 'make generate' and commit"; exit 1)
 
 build: generate buildinfo
@@ -157,6 +157,30 @@ ui-test:
 
 ui-e2e:
 	python3 scripts/ui-e2e.py $(ARGS)
+
+# Banquet conformance ledger: one row per standard rule, with status, proof and demo recipe.
+# config/conformance.sql is the source; the .db is committed so sqldoc can open it.
+CONFORMANCE_DB = docs/conformance/conformance.db
+
+$(CONFORMANCE_DB): config/conformance.sql
+	@mkdir -p docs/conformance
+	@rm -f $(CONFORMANCE_DB)
+	@sqlite3 $(CONFORMANCE_DB) < config/conformance.sql
+	@echo "Built $(CONFORMANCE_DB) from config/conformance.sql"
+
+conformance-db: $(CONFORMANCE_DB)
+
+conformance-check: $(CONFORMANCE_DB)
+	@$(SWIFT) run $(SWIFT_FLAGS) ConformanceGen check
+	@$(SWIFT) run $(SWIFT_FLAGS) ConformanceGen scorecard
+
+# Replay every shot recipe in the running dev app (`make hot` first) into docs/conformance/img/.
+conformance-shots: $(CONFORMANCE_DB)
+	@$(SWIFT) run $(SWIFT_FLAGS) ConformanceGen shoot $(ARGS)
+
+# The training page, docs/conformance/guide.html.
+conformance-guide: $(CONFORMANCE_DB)
+	@$(SWIFT) run $(SWIFT_FLAGS) ConformanceGen guide
 
 clean:
 	@rm -rf .build bin testdata/*.db
