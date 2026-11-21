@@ -20,6 +20,32 @@ Two executables, one core:
 **Zero third-party dependencies.** `Package.swift` `dependencies` is empty and
 stays empty. SQLite is the system library.
 
+### FileStudio (second app in this package)
+
+`FileStudioKit` (`Sources/FileStudioKit`, no SwiftUI) + `FileStudioApp` (`Sources/FileStudioApp`, product `FileStudio`):
+a Mac UI over a **filestudio** db (`../filestudio`, Go) for backing up to R2 and reclaiming space. The db is the only
+channel: the app never runs a transfer itself; it writes fixed, parameterised commands (`Commands`: queue an action,
+the delete phrase, `plan_items.keep`, an allowlist of settings, the backup choice) and the Go worker does the work.
+- `LiveDB.open(path:)` opens the writer first, then read-only `fast`/`slow` connections (never immutable: the worker's
+  commits must be visible; a read-only handle alone can't open a WAL db nobody else has open). `PRAGMA data_version`
+  is polled every 100 ms off the main thread; the snapshot is re-read only when it moves. Heavy views go on `slow`.
+- `WorkerSupervisor` runs `filestudio worker -with-parent` (bundled in Resources, or `$FILESTUDIO_BIN`), restarts it
+  with backoff, releases the lease of a child it saw die, and SIGTERMs it on quit (the app turns its own SIGTERM into
+  a normal quit). It leaves an external worker alone.
+- `make fs-build | fs-app | fs-hot | fs-watch | fs-test`. **`make fs-watch` is the dev loop**: it rebuilds on every
+  save of the app's Swift (and SQLDocCore) or of the Go worker in `../filestudio`, restages `bin/FileStudio.app` and
+  touches a stamp; the running dev app then saves its place (section, plan folder, a running backup/free), stops its
+  worker cleanly and relaunches itself (~4 s; a stopped backup resumes, nothing proven is re-sent).
+- The dev bundle's channel lives in `~/Library/Caches/com.mavgo.filestudio.dev/` (not beside the bundle: the repo is
+  under ~/Documents, and an ad-hoc signed rebuild reading there can trigger a privacy prompt that blocks `open()`):
+  `fs-ui.log` (`[perf] main thread stalled`), `fs-ui-state.txt`, `build.log`, the reload stamp, and
+  `fs-ui-command.txt` (`section`, `run`, `open`, `folder <source>/<folder>`, `apply <phrase>`, `shot <png>`; `shot`
+  renders the whole window synchronously, so it logs a stall of its own). `FILESTUDIO_UI_LOG_DIR` overrides the dir.
+  Develop against a copy of a real db (`sqlite3 real.db ".backup /tmp/x.db"`), not the live one.
+- Backup coverage (per top-level folder of the backed-up source) is read on the slow lane, at most every 1.5 s, not in
+  the 10 Hz snapshot; the toolbar title is fixed ("FileStudio") because SwiftUI truncates a changing title.
+- Tests (`Tests/FileStudioKitTests`) use the real Go binary to create dbs, so triggers and views are the real ones.
+
 ## Core principles — do not violate
 
 1. **Read-only unless an edit session is explicitly entered.** Files open read-only

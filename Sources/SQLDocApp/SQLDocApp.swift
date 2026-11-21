@@ -314,8 +314,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let isExplicitEnv = ProcessInfo.processInfo.environment["SQLSWIFT_HOT_RELOAD"] == "1"
         guard isRepoDev || isDevBundle || isExplicitEnv else { return }
 
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let repoBinDir = "\(home)/Documents/view_sqlite/sqlswift/bin"
+        // The dev bundle lives at <repo>/bin/SqlSwift.app; watch that bin/, wherever the repo is.
+        let repoBinDir = ProcessInfo.processInfo.environment["SQLSWIFT_BIN_DIR"]
+            ?? (bundlePath.hasSuffix("/bin/SqlSwift.app")
+                ? (bundlePath as NSString).deletingLastPathComponent
+                : FileManager.default.currentDirectoryPath + "/bin")
         let stampPath = "\(repoBinDir)/.hot-reload.stamp"
         let appBundlePath = "\(repoBinDir)/SqlSwift.app"
         let appBinaryPath = "\(appBundlePath)/Contents/MacOS/SqlSwift"

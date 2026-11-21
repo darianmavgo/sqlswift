@@ -20,6 +20,14 @@ let package = Package(
             targets: ["SQLDocApp"]
         ),
         .executable(
+            name: "FileStudio",
+            targets: ["FileStudioApp"]
+        ),
+        .library(
+            name: "FileStudioKit",
+            targets: ["FileStudioKit"]
+        ),
+        .executable(
             name: "ConfigGen",
             targets: ["ConfigGen"]
         ),
@@ -44,6 +52,22 @@ let package = Package(
             name: "SQLDocApp",
             dependencies: ["SQLDocCore"],
             path: "Sources/SQLDocApp"
+        ),
+        // FileStudio: backup-to-R2 and reclaim UI over a filestudio db (the Go worker does the work).
+        .target(
+            name: "FileStudioKit",
+            dependencies: ["SQLDocCore"],
+            path: "Sources/FileStudioKit"
+        ),
+        .executableTarget(
+            name: "FileStudioApp",
+            dependencies: ["FileStudioKit"],
+            path: "Sources/FileStudioApp"
+        ),
+        .testTarget(
+            name: "FileStudioKitTests",
+            dependencies: ["FileStudioKit", "SQLDocCore"],
+            path: "Tests/FileStudioKitTests"
         ),
         // Build-time only: reads sqldoc.db, writes Sources/SQLDocCore/Generated/.
         .executableTarget(

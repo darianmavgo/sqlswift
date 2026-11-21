@@ -10,7 +10,7 @@ export SWIFTPM_MODULECACHE_OVERRIDE ?= /tmp/swiftpm-cache
 SWIFT ?= /usr/bin/swift
 SWIFT_FLAGS ?= --disable-sandbox
 
-.PHONY: all build release test clean install install-cli install-app uninstall app bench config generate icons config-check buildinfo lsclean lslist uilog uistate ui-test ui-e2e conformance-db conformance-check conformance-shots conformance-guide conformance-deck
+.PHONY: fs-worker fs-build fs-app fs-hot fs-stage fs-watch fs-test all build release test clean install install-cli install-app uninstall app bench config generate icons config-check buildinfo lsclean lslist uilog uistate ui-test ui-e2e conformance-db conformance-check conformance-shots conformance-guide conformance-deck
 
 LSREGISTER = /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 BUNDLE_ID  = com.mavgo.sqlswift
@@ -87,6 +87,54 @@ app: release
 	@echo "built bin/$(APP_NAME).app and bin/$(CLI_NAME) ($$(git rev-parse --short=9 HEAD 2>/dev/null || echo unknown))"
 
 # `make install` = full release build & installation via scripts/install-app.sh
+# ---- FileStudio (backup-to-R2 + reclaim UI over a filestudio db; see Sources/FileStudioApp) ----
+FS_APP    = bin/FileStudio.app
+FS_GO_BIN = ../filestudio/bin/filestudio
+
+# fs_bundle <swift build dir>: assemble $(FS_APP) from that build, with the Go worker inside.
+define fs_bundle
+	@rm -rf $(FS_APP)
+	@mkdir -p $(FS_APP)/Contents/MacOS $(FS_APP)/Contents/Resources
+	@cp $(1)/FileStudio $(FS_APP)/Contents/MacOS/FileStudio
+	@cp config/filestudio/Info.plist $(FS_APP)/Contents/Info.plist
+	@printf 'APPL????' > $(FS_APP)/Contents/PkgInfo
+	@cp config/assets/AppIcon.icns $(FS_APP)/Contents/Resources/AppIcon.icns
+	@if [ -x $(FS_GO_BIN) ]; then cp $(FS_GO_BIN) $(FS_APP)/Contents/Resources/filestudio; \
+	 else echo "note: $(FS_GO_BIN) not built; the app will look for filestudio on PATH (go build -o bin/filestudio ./cmd/filestudio)"; fi
+	@/usr/bin/codesign --force --deep --sign - $(FS_APP) >/dev/null 2>&1 || true
+endef
+
+fs-worker:
+	@if [ -d ../filestudio ]; then cd ../filestudio && go build -o bin/filestudio ./cmd/filestudio && echo "built $(FS_GO_BIN)"; fi
+
+fs-build: generate buildinfo fs-worker
+	$(SWIFT) build $(SWIFT_FLAGS) --product FileStudio
+
+fs-app: generate buildinfo fs-worker
+	$(SWIFT) build $(SWIFT_FLAGS) -c release --product FileStudio
+	$(call fs_bundle,.build/release)
+	@echo "built $(FS_APP)"
+
+# Debug bundle at bin/FileStudio.app: writes bin/fs-ui.log (main-thread stalls) and fs-ui-state.txt,
+# and runs commands from bin/fs-ui-command.txt. Rebuilds and relaunches.
+fs-hot: fs-build
+	@pkill -x FileStudio 2>/dev/null; sleep 0.5; true
+	$(call fs_bundle,.build/debug)
+	@open $(FS_APP)
+	@echo "running $(FS_APP); tail -f bin/fs-ui.log"
+
+# Stage the debug bundle without launching (used by the hot-reload watcher).
+fs-stage:
+	$(call fs_bundle,.build/debug)
+
+# Hot reload: rebuild on every save of the app's Swift or the Go worker; the running app relaunches
+# itself in place (same section, folder, and a running backup continues).
+fs-watch:
+	@zsh scripts/fs-hot-reload.sh
+
+fs-test: fs-worker
+	$(SWIFT) test $(SWIFT_FLAGS) --filter FileStudioKitTests
+
 install:
 	@sh scripts/install-app.sh
 	@$(MAKE) lsclean
