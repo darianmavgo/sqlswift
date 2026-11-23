@@ -10,7 +10,7 @@ public final class Commands: @unchecked Sendable {
     private let conn: SQLiteConnection
     private let lock = NSLock()
 
-    public static let actions: Set<String> = ["free", "apply", "backup", "retry_failed", "stop"]
+    public static let actions: Set<String> = ["free", "apply", "backup", "retry_failed", "stop", "apps_scan", "apps_remove"]
     public static let settingKeys: Set<String> = [
         "bk_transfers", "bk_big_transfers", "bk_checkers", "bk_multi_thread_streams",
         "bk_s3_upload_concurrency", "bk_s3_chunk_size", "bk_s3_upload_cutoff", "bk_retries",
@@ -23,7 +23,7 @@ public final class Commands: @unchecked Sendable {
 
     /// Queues an action (the worker picks it up within ~150 ms).
     public func run(_ action: String) throws {
-        guard Self.actions.contains(action), action != "apply" else { throw CommandError.notAllowed(action) }
+        guard Self.actions.contains(action), action != "apply", action != "apps_remove" else { throw CommandError.notAllowed(action) }
         try write("UPDATE actions SET run='go' WHERE name=? RETURNING id", [action])
     }
 
@@ -41,6 +41,35 @@ public final class Commands: @unchecked Sendable {
             _ = try? conn.exec("ROLLBACK")
             throw CommandError.refused(Self.message(error))
         }
+    }
+
+    /// Removes the picked apps: needs the exact phrase from v_apps_gate (trigger and worker check it too).
+    public func removeApps(confirm phrase: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        do {
+            _ = try conn.exec("BEGIN IMMEDIATE")
+            _ = try conn.query("UPDATE actions SET confirm=? WHERE name='apps_remove'", args: [phrase])
+            _ = try conn.query("UPDATE actions SET run='go' WHERE name='apps_remove'")
+            _ = try conn.exec("COMMIT")
+        } catch {
+            _ = try? conn.exec("ROLLBACK")
+            throw CommandError.refused(Self.message(error))
+        }
+    }
+
+    /// Ticks an app for removal (only app_library.pick changes; macOS's own apps can't be ticked).
+    public func setAppPick(path: String, pick: Bool) throws {
+        try write("UPDATE app_library SET pick=? WHERE path=? AND removable=1 RETURNING path", [pick ? 1 : 0, path])
+    }
+
+    /// Whether removing an app also removes its data folders (app_library.with_data).
+    public func setAppWithData(path: String, on: Bool) throws {
+        try write("UPDATE app_library SET with_data=? WHERE path=? AND removable=1 RETURNING path", [on ? 1 : 0, path])
+    }
+
+    public func clearAppPicks() throws {
+        _ = try locked { try conn.query("UPDATE app_library SET pick=0 WHERE pick=1") }
     }
 
     /// Protects (or unprotects) one file of a plan. Only plan_items.keep changes.

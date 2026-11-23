@@ -4,7 +4,7 @@ import FileStudioKit
 /// A donut showing the proven share of the backup, with the percent in the middle.
 struct CoverageRing: View {
     let fraction: Double
-    var tint: Color = .green
+    var tint: Color = .fsOk
     var lineWidth: CGFloat = 10
 
     var body: some View {
@@ -17,7 +17,7 @@ struct CoverageRing: View {
                 .rotationEffect(.degrees(-90))
                 .animation(.easeOut(duration: 0.4), value: fraction)
             Text(Fmt.percent(fraction))
-                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                .font(.system(size: 22, weight: .semibold, design: .monospaced))
                 .monospacedDigit()
                 .contentTransition(.numericText())
         }
@@ -39,7 +39,7 @@ struct BackupHeroCard: View {
                     .frame(width: 92, height: 92)
                     .redacted(reason: c == nil ? .placeholder : [])
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(headline).font(.title2.weight(.semibold))
+                    Text(headline).font(.system(size: 16, weight: .semibold))
                     if let c {
                         Text(c.complete
                              ? "All \(Fmt.files(c.files)) (\(Fmt.bytes(c.bytes))) have a checksum-proven copy."
@@ -49,7 +49,7 @@ struct BackupHeroCard: View {
                     }
                     if let scan = model.backupScanProgress {
                         Label(scan, systemImage: "magnifyingglass")
-                            .font(.callout.weight(.medium)).monospacedDigit()
+                            .font(FSFont.label).monospacedDigit()
                             .foregroundStyle(.tint)
                             .contentTransition(.numericText())
                     } else if model.isBackupRunning, let live = s.live {
@@ -58,7 +58,7 @@ struct BackupHeroCard: View {
                             Label("\(Fmt.duration(live.eta)) left", systemImage: "clock")
                             Label("\(live.active) in flight", systemImage: "arrow.up.circle")
                         }
-                        .font(.callout.weight(.medium)).monospacedDigit()
+                        .font(FSFont.label).monospacedDigit()
                         .foregroundStyle(.tint)
                         .contentTransition(.numericText())
                     }
@@ -67,7 +67,7 @@ struct BackupHeroCard: View {
                     }
                     if let run = s.run, !run.isActive {
                         Text("Last backup \(Fmt.ago(run.finishedAt.isEmpty ? run.startedAt : run.finishedAt))")
-                            .font(.caption).foregroundStyle(.tertiary)
+                            .font(FSFont.caption).foregroundStyle(.tertiary)
                     }
                 }
                 Spacer(minLength: 12)
@@ -78,7 +78,7 @@ struct BackupHeroCard: View {
 
     private var ringTint: Color {
         guard let c = model.coverage?.total else { return .secondary }
-        return c.complete ? .green : (model.isBackupRunning ? .accentColor : .orange)
+        return c.complete ? .fsOk : (model.isBackupRunning ? .accentColor : .fsWarn)
     }
 
     private var headline: String {
@@ -123,7 +123,7 @@ struct RouteLine: View {
         HStack(spacing: 6) {
             Image(systemName: "folder").foregroundStyle(.secondary)
             Text(Self.tilde(from?.remote ?? s.config.from)).help(s.config.from)
-            Image(systemName: "arrow.right").font(.caption).foregroundStyle(.tertiary)
+            Image(systemName: "arrow.right").font(FSFont.caption).foregroundStyle(.tertiary)
             Image(systemName: "cloud").foregroundStyle(.secondary)
             Text(dest).help(s.config.target)
         }
@@ -172,11 +172,11 @@ struct FolderCoverageCard: View {
                     ForEach(shown) { f in
                         GridRow {
                             Image(systemName: f.coverage.complete ? "checkmark.circle.fill" : (f.coverage.provenFiles > 0 ? "circle.lefthalf.filled" : "circle"))
-                                .foregroundStyle(f.coverage.complete ? .green : (f.coverage.provenFiles > 0 ? Color.accentColor : .secondary))
+                                .foregroundStyle(f.coverage.complete ? .fsOk : (f.coverage.provenFiles > 0 ? Color.accentColor : .secondary))
                             Text(f.folder == "." ? "(top level)" : f.folder)
                                 .lineLimit(1).truncationMode(.middle)
                                 .frame(minWidth: 120, maxWidth: 260, alignment: .leading)
-                            Meter(fraction: f.coverage.fraction, tint: f.coverage.complete ? .green : .accentColor, height: 6)
+                            Meter(fraction: f.coverage.fraction, tint: f.coverage.complete ? .fsOk : .accentColor, height: 6)
                                 .frame(minWidth: 80)
                                 .gridColumnAlignment(.leading)
                             Text(Fmt.percent(f.coverage.fraction))
@@ -186,7 +186,7 @@ struct FolderCoverageCard: View {
                                 .monospacedDigit().foregroundStyle(.secondary)
                                 .frame(width: 104, alignment: .trailing)
                         }
-                        .font(.callout)
+                        .font(FSFont.body)
                         .help("\(Fmt.count(f.coverage.provenFiles)) of \(Fmt.files(f.coverage.files)) proven · \(Fmt.bytes(f.coverage.provenBytes)) of \(Fmt.bytes(f.coverage.bytes))")
                     }
                 }
@@ -201,6 +201,8 @@ enum Humanize {
         var s = m
         for (from, to) in [
             (" (see deleted_log)", ""),
+            (" (see app_removed_log)", ""),
+            (" Pick them in app_library.", ""),
             (" Review them in plan_items, then see v_apply_gate.", ""),
             ("; 0 problems, usually files already gone", ""),
             (" in the backup", ""),
@@ -225,6 +227,8 @@ enum Humanize {
         case "backup": "Backup"
         case "retry_failed": "Retry failed"
         case "stop": "Stop"
+        case "apps_scan": "Find apps and games"
+        case "apps_remove": "Remove apps"
         default: a.capitalized
         }
     }

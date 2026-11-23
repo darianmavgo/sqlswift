@@ -39,11 +39,16 @@ the delete phrase, `plan_items.keep`, an allowlist of settings, the backup choic
 - The dev bundle's channel lives in `~/Library/Caches/com.mavgo.filestudio.dev/` (not beside the bundle: the repo is
   under ~/Documents, and an ad-hoc signed rebuild reading there can trigger a privacy prompt that blocks `open()`):
   `fs-ui.log` (`[perf] main thread stalled`), `fs-ui-state.txt`, `build.log`, the reload stamp, and
-  `fs-ui-command.txt` (`section`, `run`, `open`, `folder <source>/<folder>`, `apply <phrase>`, `shot <png>`; `shot`
+  `fs-ui-command.txt` (`section`, `run`, `open`, `folder <source>/<folder>`, `keep <source> <path>`, `apply <phrase>`,
+  `appearance dark|light|system`, `shot <png>`; `shot`
   renders the whole window synchronously, so it logs a stall of its own). `FILESTUDIO_UI_LOG_DIR` overrides the dir.
   Develop against a copy of a real db (`sqlite3 real.db ".backup /tmp/x.db"`), not the live one.
 - Backup coverage (per top-level folder of the backed-up source) is read on the slow lane, at most every 1.5 s, not in
-  the 10 Hz snapshot; the toolbar title is fixed ("FileStudio") because SwiftUI truncates a changing title.
+  the 10 Hz snapshot; the window has no title bar text (the path field shows the open db).
+- Looks like SqlSwift on purpose: `FileStudioApp/Theme.swift` resolves the same generated `DesignToken`s (green accent,
+  ink/dim/rule/head/page, status colours) and copies SqlSwift's chrome (28 pt toolbar buttons, path field, 255 pt
+  navigator on `head`, count pills, uppercase section headers, status bar with a timing badge). Hidden title bar, no
+  NavigationSplitView. New UI uses `Card`, `Pill`, `Tag`, `SectionHeader`, `ToolbarButton`, `.fsOk/.fsWarn/.fsError`.
 - Tests (`Tests/FileStudioKitTests`) use the real Go binary to create dbs, so triggers and views are the real ones.
 
 ## Core principles — do not violate

@@ -4,13 +4,14 @@ import SQLDocCore
 import FileStudioKit
 
 enum AppSection: String, CaseIterable, Identifiable {
-    case overview, backup, reclaim, activity, settings
+    case overview, backup, reclaim, apps, activity, settings
     var id: String { rawValue }
     var title: String {
         switch self {
         case .overview: "Overview"
         case .backup: "Backup"
         case .reclaim: "Reclaim Space"
+        case .apps: "Apps & Games"
         case .activity: "Activity"
         case .settings: "Settings"
         }
@@ -20,6 +21,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .overview: "gauge.with.dots.needle.67percent"
         case .backup: "icloud.and.arrow.up"
         case .reclaim: "externaldrive.badge.checkmark"
+        case .apps: "square.grid.2x2"
         case .activity: "clock.arrow.circlepath"
         case .settings: "slider.horizontal.3"
         }
@@ -43,6 +45,8 @@ final class AppModel {
     private(set) var coverage: CoverageReport?
     private(set) var workerStatus: WorkerSupervisor.Status = .stopped
     private(set) var speedHistory: [Double] = []
+    /// How long the latest snapshot took to read, in µs (the status bar's timing badge).
+    private(set) var lastLoadMicros: Int64 = 0
     var alert: String?
     var pendingCommand: String?
 
@@ -177,13 +181,16 @@ final class AppModel {
                 guard v != last || Date().timeIntervalSince(lastFull) > 5 else { continue }
                 last = v
                 lastFull = Date()
+                let t0 = DispatchTime.now().uptimeNanoseconds
                 let snap = db.loadSnapshot()
-                await self?.apply(snap)
+                let us = Int64((DispatchTime.now().uptimeNanoseconds - t0) / 1000)
+                await self?.apply(snap, loadMicros: us)
             }
         }
     }
 
-    private func apply(_ snap: Snapshot) {
+    private func apply(_ snap: Snapshot, loadMicros: Int64 = 0) {
+        if loadMicros > 0 { lastLoadMicros = loadMicros }
         if let live = snap.live, live.updatedAt != lastStatsStamp, snap.run?.isActive == true {
             lastStatsStamp = live.updatedAt
             speedHistory.append(live.speed)

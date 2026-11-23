@@ -165,6 +165,6 @@ public final class BenchmarkRunner {
     }
 
     public static func formatInt(_ n: Int64) -> String {
-        return NumberFormatter.localizedString(from: NSNumber(value: n), number: .decimal)
+        return n.formatted(.number.locale(Locale(identifier: "en_US")))
     }
 }

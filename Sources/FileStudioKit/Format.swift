@@ -2,22 +2,25 @@ import Foundation
 
 /// Human formatting shared by the views (Kit has no SwiftUI, so this is plain strings).
 public enum Fmt {
+    /// US formatting everywhere ("1,234.5"), regardless of the Mac's region setting.
+    public static let locale = Locale(identifier: "en_US")
+
     public static func bytes(_ n: Int64) -> String {
-        n == 0 ? "0 bytes" : ByteCountFormatter.string(fromByteCount: n, countStyle: .file)
+        n == 0 ? "0 bytes" : n.formatted(.byteCount(style: .file).locale(locale))
     }
 
-    /// "1 file", "2.004 files".
+    /// "1 file", "2,004 files".
     public static func files(_ n: Int64, _ noun: String = "file") -> String {
         "\(count(n)) \(n == 1 ? noun : noun + "s")"
     }
 
     public static func rate(_ bytesPerSecond: Double) -> String {
         guard bytesPerSecond.isFinite, bytesPerSecond > 0 else { return "—" }
-        return ByteCountFormatter.string(fromByteCount: Int64(bytesPerSecond), countStyle: .file) + "/s"
+        return Int64(bytesPerSecond).formatted(.byteCount(style: .file).locale(locale)) + "/s"
     }
 
     public static func count(_ n: Int64) -> String {
-        n.formatted(.number)
+        n.formatted(.number.locale(locale))
     }
 
     public static func duration(_ seconds: Double?) -> String {
@@ -31,7 +34,7 @@ public enum Fmt {
 
     public static func percent(_ f: Double) -> String {
         guard f.isFinite else { return "—" }
-        return (f * 100).formatted(.number.precision(.fractionLength(f > 0 && f < 0.1 ? 1 : 0))) + "%"
+        return (f * 100).formatted(.number.precision(.fractionLength(f > 0 && f < 0.1 ? 1 : 0)).locale(locale)) + "%"
     }
 
     /// "2026-11-20 16:26:26" / RFC 3339 from SQLite -> "3 min ago".

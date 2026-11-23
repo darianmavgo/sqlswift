@@ -199,7 +199,7 @@ public struct DataInspectorView: View {
     private func largeTextInspectorView(_ text: String) -> some View {
         let shown = String(text.prefix(BehaviorConfig.inspectorTextRenderMaxChars))
         return VStack(alignment: .leading, spacing: 10) {
-            Text("\(formatBytes(text.utf8.count)) of text · showing the first \(BehaviorConfig.inspectorTextRenderMaxChars.formatted()) characters · Copy takes all of it")
+            Text("\(formatBytes(text.utf8.count)) of text · showing the first \(BehaviorConfig.inspectorTextRenderMaxChars.formatted(.number.locale(Locale(identifier: "en_US")))) characters · Copy takes all of it")
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundColor(.secondary)
             Text(shown + "…")

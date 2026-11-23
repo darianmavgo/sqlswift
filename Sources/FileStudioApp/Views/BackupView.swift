@@ -30,12 +30,12 @@ struct BackupView: View {
             HStack(alignment: .center, spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
                     if s.config.from.isEmpty || s.config.target.isEmpty {
-                        Text("Nothing chosen to back up").font(.title3.weight(.semibold))
+                        Text("Nothing chosen to back up").font(.system(size: 14, weight: .semibold))
                         Text("Choose a local source and a backup in Settings.").foregroundStyle(.secondary)
                     } else {
-                        Text(title).font(.title3.weight(.semibold))
+                        Text(title).font(.system(size: 14, weight: .semibold))
                         RouteLine()
-                        Text(headerLine).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                        Text(headerLine).font(FSFont.body).foregroundStyle(.secondary).lineLimit(2)
                     }
                 }
                 Spacer()
@@ -99,7 +99,7 @@ struct LiveRunCard: View {
                 // moves the bar instead of leaving it at 0% until it lands. rclone counts bytes as it
                 // reads them, a little ahead of R2, so they are never shown as proven.
                 let moving = run.isActive ? sendingFraction(live) : 0
-                Meter(fraction: run.fraction, tint: run.filesFailed > 0 && !run.isActive ? .orange : .accentColor, height: 10,
+                Meter(fraction: run.fraction, tint: run.filesFailed > 0 && !run.isActive ? .fsWarn : .accentColor, height: 10,
                       under: moving)
                     .animation(.easeOut(duration: 0.25), value: run.fraction)
                     .animation(.easeOut(duration: 0.25), value: moving)
@@ -112,7 +112,7 @@ struct LiveRunCard: View {
                     } else {
                         metric("Sent", Fmt.count(run.filesUploaded), Fmt.bytes(run.bytesUploaded))
                     }
-                    if run.filesFailed > 0 { metric("Need attention", Fmt.count(run.filesFailed), "see below", tint: .orange) }
+                    if run.filesFailed > 0 { metric("Need attention", Fmt.count(run.filesFailed), "see below", tint: .fsWarn) }
                     Spacer(minLength: 0)
                 }
                 if run.isActive && !compact {
@@ -121,7 +121,7 @@ struct LiveRunCard: View {
                         if let peak = model.speedHistory.max(), peak > 0 {
                             let avg = model.speedHistory.reduce(0, +) / Double(model.speedHistory.count)
                             Text("Peak \(Fmt.rate(peak)) · average \(Fmt.rate(avg))")
-                                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                                .font(FSFont.caption).foregroundStyle(.secondary).monospacedDigit()
                         }
                     }
                 }
@@ -138,10 +138,10 @@ struct LiveRunCard: View {
 
     private func metric(_ title: String, _ value: String, _ detail: String, tint: Color = .primary) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.title3.weight(.semibold)).monospacedDigit().foregroundStyle(tint)
+            Text(title).font(FSFont.caption).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 14, weight: .semibold, design: .monospaced)).foregroundStyle(tint)
                 .contentTransition(.numericText())
-            Text(detail).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            Text(detail).font(FSFont.caption).foregroundStyle(.secondary).monospacedDigit()
         }
     }
 }
@@ -209,7 +209,7 @@ private struct RunsCard: View {
                         Spacer()
                         Text(Fmt.ago(r.startedAt)).foregroundStyle(.secondary)
                     }
-                    .font(.callout)
+                    .font(FSFont.body)
                 }
             }
         }

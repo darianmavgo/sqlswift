@@ -41,7 +41,7 @@ public enum SQLiteError: LocalizedError {
             return "Query cancelled."
         case .timedOut(let millis):
             let secs = Double(millis) / 1000
-            return "Query stopped after \(secs.formatted(.number.precision(.fractionLength(0...1)))) s. Narrow it with a filter or a LIMIT."
+            return "Query stopped after \(secs.formatted(.number.precision(.fractionLength(0...1)).locale(Locale(identifier: "en_US")))) s. Narrow it with a filter or a LIMIT."
         }
     }
 }

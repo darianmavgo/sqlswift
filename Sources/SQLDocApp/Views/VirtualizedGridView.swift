@@ -1024,7 +1024,7 @@ public struct CellView: View {
         if isDeleted { return "row will be deleted on commit" }
         if isPending { return "pending edit · was: \(originalText ?? "")" }
         if case .textPrefix(_, let total) = value {
-            return "\(total.formatted()) bytes — double-click to inspect"
+            return "\(total.formatted(.number.locale(Locale(identifier: "en_US")))) bytes — double-click to inspect"
         }
         let raw = value.rawText
         if smartText != nil || raw != shownText {

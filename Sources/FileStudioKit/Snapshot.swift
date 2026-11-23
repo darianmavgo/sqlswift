@@ -71,6 +71,33 @@ public struct ApplyGate: Equatable, Sendable {
     public let files: Int64
     public let gb: Double
     public let phrase: String
+    public let source: String     // the local source the plan was made for
+}
+
+/// v_apps_gate: the picked apps and the phrase that removes them.
+public struct AppsGate: Equatable, Sendable {
+    public let apps: Int64
+    public let bytes: Int64
+    public let phrase: String
+}
+
+/// One app or game of app_library.
+public struct LibraryApp: Equatable, Sendable, Identifiable {
+    public var id: String { path }
+    public let path, name, bundleID, version, kind, vendor, store, location: String
+    public let size, dataSize: Int64
+    public let lastUsed: String
+    public let removable, needsAdmin: Bool
+    public let note: String
+    public var pick, withData: Bool
+
+    /// A copy with other ticks (the view shows a tick before the db write lands).
+    public func with(pick: Bool? = nil, withData: Bool? = nil) -> LibraryApp {
+        var c = self
+        c.pick = pick ?? self.pick
+        c.withData = withData ?? self.withData
+        return c
+    }
 }
 
 public struct PlanFolder: Equatable, Sendable, Identifiable {
@@ -125,6 +152,7 @@ public struct Snapshot: Equatable, Sendable {
     public var settings: [String: String] = [:]
     public var gate: ApplyGate?
     public var planFolders: [PlanFolder] = []
+    public var appsGate: AppsGate?
 
     public init() {}
 
@@ -209,8 +237,11 @@ public extension LiveDB {
         let t = try? row("SELECT source, prefix, from_source FROM backup_targets WHERE is_default=1")
         s.config = BackupConfig(target: t?.string(0) ?? "", prefix: t?.string(1) ?? "", from: t?.string(2) ?? "",
                                 freeLocal: s.settings["default_local"] ?? "")
-        if let r = try? row("SELECT plan_id, files, gb, coalesce(phrase,'') FROM v_apply_gate") {
-            s.gate = ApplyGate(planID: r.int(0), files: r.int(1), gb: r.double(2), phrase: r.string(3))
+        if let r = try? row("SELECT g.plan_id, g.files, g.gb, coalesce(g.phrase,''), coalesce(p.source,'') FROM v_apply_gate g LEFT JOIN plans p ON p.id = g.plan_id") {
+            s.gate = ApplyGate(planID: r.int(0), files: r.int(1), gb: r.double(2), phrase: r.string(3), source: r.string(4))
+        }
+        if let r = try? row("SELECT apps, bytes, coalesce(phrase,'') FROM v_apps_gate") {
+            s.appsGate = AppsGate(apps: r.int(0), bytes: r.int(1), phrase: r.string(2))
         }
         s.planFolders = ((try? rows("SELECT source, folder, files, bytes, kept, deleted FROM v_plan_folders ORDER BY bytes DESC LIMIT 500")) ?? []).map {
             PlanFolder(source: $0.string(0), folder: $0.string(1), files: $0.int(2), bytes: $0.int(3), kept: $0.int(4), deleted: $0.int(5))
@@ -287,6 +318,19 @@ public extension LiveDB {
             PlanFile(planID: $0.int(0), source: $0.string(1), path: $0.string(2), reason: $0.string(3),
                      confidence: $0.string(4), keepCopy: $0.string(5), status: $0.string(6), size: $0.int(7), keep: $0.bool(8),
                      note: $0.string(9))
+        }
+    }
+
+    /// Every app and game from the latest apps_scan, biggest first.
+    func appLibrary() throws -> [LibraryApp] {
+        try slowRows("""
+            SELECT path, name, bundle_id, version, kind, vendor, store, location, size, data_size, last_used,
+              removable, needs_admin, note, pick, with_data FROM app_library ORDER BY size DESC
+            """, budgetMs: 5_000).map {
+            LibraryApp(path: $0.string(0), name: $0.string(1), bundleID: $0.string(2), version: $0.string(3),
+                       kind: $0.string(4), vendor: $0.string(5), store: $0.string(6), location: $0.string(7),
+                       size: $0.int(8), dataSize: $0.int(9), lastUsed: $0.string(10), removable: $0.bool(11),
+                       needsAdmin: $0.bool(12), note: $0.string(13), pick: $0.bool(14), withData: $0.bool(15))
         }
     }
 

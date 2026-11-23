@@ -61,7 +61,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "FileStudioApp",
-            dependencies: ["FileStudioKit"],
+            dependencies: ["FileStudioKit", "SQLDocCore"], // SQLDocCore: the shared design tokens
             path: "Sources/FileStudioApp"
         ),
         .testTarget(

@@ -5,7 +5,10 @@ import FileStudioKit
 /// proof, protect toggles, and the typed-phrase delete.
 struct ReclaimView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.fsPalette) private var palette
     @State private var confirming = false
+    /// Set by "Delete … " when no current plan exists: open the confirm sheet once the plan lands.
+    @State private var confirmWhenReady = false
 
     var body: some View {
         let s = model.snapshot
@@ -14,7 +17,7 @@ struct ReclaimView: View {
                 .padding([.horizontal, .top], 20)
                 .padding(.bottom, 12)
             Divider()
-            if s.planFolders.isEmpty {
+            if !planIsCurrent {
                 NoPlanView()
             } else {
                 HSplitView {
@@ -24,13 +27,30 @@ struct ReclaimView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if let gate = s.gate, gate.files > 0 { deleteBar(gate) }
+            if planIsCurrent, let gate = s.gate, gate.files > 0 { deleteBar(gate) }
         }
         .sheet(isPresented: $confirming) {
             if let gate = model.snapshot.gate { ConfirmDeleteSheet(gate: gate) }
         }
-        .onChange(of: s.gate?.planID) { model.reclaimFolder = nil; selectFirst() }
+        .onChange(of: s.gate?.planID) {
+            model.reclaimFolder = nil
+            selectFirst()
+            if confirmWhenReady, planIsCurrent, (s.gate?.files ?? 0) > 0 { confirming = true }
+            confirmWhenReady = false
+        }
+        .onChange(of: s.actions["free"]?.isBusy) { _, busy in
+            // the plan run ended without a new plan (error or nothing qualified)
+            if busy == false, confirmWhenReady, !planIsCurrent { confirmWhenReady = false }
+        }
         .onAppear { selectFirst() }
+    }
+
+    /// The latest plan is for the source shown here. A plan for another source (or none) is not
+    /// what the header's number describes, so it is neither listed nor offered for delete.
+    private var planIsCurrent: Bool {
+        let s = model.snapshot
+        guard let g = s.gate, g.planID > 0, !s.planFolders.isEmpty else { return false }
+        return g.source == s.config.freeLocal
     }
 
     /// Open on the biggest folder rather than an empty pane.
@@ -52,7 +72,7 @@ struct ReclaimView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(Fmt.bytes(bytes))
-                        .font(.system(size: 28, weight: .semibold, design: .rounded)).monospacedDigit()
+                        .font(.system(size: 28, weight: .semibold, design: .monospaced))
                     Text("ready to reclaim on").foregroundStyle(.secondary)
                     sourceMenu
                     if model.reclaimLoading { ProgressView().controlSize(.small) }
@@ -62,20 +82,34 @@ struct ReclaimView: View {
                         ? "Nothing more to reclaim right now. Protected files and files changed since their backup are left out."
                         : "Back up first; files appear here once their copy is proven.")
                      : "\(Fmt.files(files)) in \(Fmt.files(Int64(mine.count), "folder")). Only checksum-proven copies, same-content duplicates and regenerable files qualify.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(FSFont.body).foregroundStyle(.secondary)
             }
             Spacer()
             if let a = s.actions["free"], a.isBusy {
                 ProgressView().controlSize(.small)
-                Text(a.message).font(.callout).foregroundStyle(.secondary).lineLimit(1).frame(maxWidth: 260)
+                Text(a.message).font(FSFont.body).foregroundStyle(.secondary).lineLimit(1).frame(maxWidth: 260)
             }
-            let noPlan = s.planFolders.isEmpty
-            Button { model.run("free") } label: {
-                Label(noPlan ? "Find Files I Can Delete" : "Find Again", systemImage: "magnifyingglass")
-            }
-            .buttonStyle(ProminentIf(noPlan && !mine.isEmpty))
-            .disabled(busy != nil || !model.workerHealthy)
+            if !planIsCurrent && !mine.isEmpty {
+                // One click toward the number in the header: re-prove every file, then ask to confirm.
+                Button(role: .destructive) {
+                    confirmWhenReady = true
+                    model.run("free")
+                } label: {
+                    Label(confirmWhenReady && busy != nil ? "Checking \(Fmt.bytes(bytes))…" : "Delete \(Fmt.bytes(bytes))…",
+                          systemImage: "trash")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.fsError)
+                .controlSize(.large)
+                .disabled(busy != nil || !model.workerHealthy)
+                .help("Re-checks each file against your backup by checksum, then asks you to confirm. Nothing is deleted until you type the phrase.")
+            } else {
+                Button { model.run("free") } label: {
+                    Label(planIsCurrent ? "Find Again" : "Find Files I Can Delete", systemImage: "magnifyingglass")
+                }
+                .disabled(busy != nil || !model.workerHealthy)
                 .help("Verifies candidates against your backup by checksum and saves a plan. Deletes nothing.")
+            }
         }
     }
 
@@ -104,26 +138,52 @@ struct ReclaimView: View {
     private var folderList: some View {
         let folders = model.snapshot.planFolders
         let peak = Double(folders.map(\.bytes).max() ?? 1)
-        @Bindable var model = model
-        return List(selection: $model.reclaimFolder) {
-            Section(planTitle) {
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
+                SectionHeader(title: planTitle, count: folders.count)
                 ForEach(folders) { f in
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack {
-                            Text(f.folder == "." ? "(top level)" : f.folder).lineLimit(1).truncationMode(.middle)
-                            Spacer()
-                            Text(Fmt.bytes(f.bytes)).monospacedDigit().foregroundStyle(.secondary)
-                        }
-                        Meter(fraction: Double(f.bytes) / max(peak, 1), tint: f.kept > 0 ? .orange : .accentColor, height: 4)
-                        Text(Fmt.files(f.files) + (f.kept > 0 ? " · \(Fmt.count(f.kept)) protected" : "") + (f.deleted > 0 ? " · \(Fmt.count(f.deleted)) deleted" : ""))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 3)
-                    .tag(f.id)
+                    folderRow(f, peak: peak).padding(.horizontal, 8)
                 }
             }
+            .padding(.vertical, 8)
         }
-        .listStyle(.sidebar)
+        .background(palette.head)
+    }
+
+    /// TableSidebarView.tableRow, with a size bar under the name.
+    private func folderRow(_ f: PlanFolder, peak: Double) -> some View {
+        let selected = model.reclaimFolder == f.id
+        return Button { model.reclaimFolder = f.id } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 10))
+                        .foregroundColor(selected ? .white : .accentColor)
+                        .frame(width: 14)
+                    Text(f.folder == "." ? "(top level)" : f.folder)
+                        .font(.system(size: 11.5, weight: selected ? .semibold : .regular, design: .monospaced))
+                        .foregroundColor(selected ? .white : .primary)
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    Pill(text: Fmt.bytes(f.bytes), selected: selected)
+                }
+                Meter(fraction: Double(f.bytes) / max(peak, 1),
+                      tint: selected ? .white : (f.kept > 0 ? .fsWarn : .accentColor), height: 3)
+                    .padding(.leading, 20)
+                Text(Fmt.files(f.files) + (f.kept > 0 ? " · \(Fmt.count(f.kept)) protected" : "") + (f.deleted > 0 ? " · \(Fmt.count(f.deleted)) deleted" : ""))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(selected ? .white.opacity(0.85) : .secondary)
+                    .padding(.leading, 20)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? Color.accentColor : Color.clear)
+            .cornerRadius(5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(f.folder)
     }
 
     /// The gate counts what will really go (not protected, not done) but rounds to 0.01 GB; below
@@ -143,13 +203,13 @@ struct ReclaimView: View {
         HStack(spacing: 12) {
             Image(systemName: "lock.shield").foregroundStyle(.secondary)
             Text("Each file is checked again against the disk right before it is deleted. Deletes are permanent (no Trash) and logged with where the copy is.")
-                .font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                .font(FSFont.body).foregroundStyle(.secondary).lineLimit(2)
             Spacer()
             Button(role: .destructive) { confirming = true } label: {
                 Text("Delete \(Fmt.files(gate.files).capitalized) (\(Fmt.bytes(planBytes(gate))))…")
             }
             .buttonStyle(.borderedProminent)
-            .tint(.red)
+            .tint(.fsError)
             .disabled(model.snapshot.busyAction != nil || !model.workerHealthy)
         }
         .padding(.horizontal, 20)
@@ -172,7 +232,7 @@ private struct PlanFilesView: View {
             if let folder {
                 VStack(spacing: 0) {
                     HStack {
-                        Text(folder.folder == "." ? "(top level)" : folder.folder).font(.headline).lineLimit(1)
+                        Text(folder.folder == "." ? "(top level)" : folder.folder).font(.system(size: 13, weight: .semibold, design: .monospaced)).lineLimit(1)
                         Text("\(Fmt.files(folder.files)) · \(Fmt.bytes(folder.bytes))").foregroundStyle(.secondary)
                             .lineLimit(1).fixedSize()
                         Spacer()
@@ -197,12 +257,12 @@ private struct PlanFilesView: View {
                                     .strikethrough(f.status == "done")
                                 if f.status == "refused" {
                                     Label("Not deleted: \(Humanize.reason(f.note))", systemImage: "exclamationmark.triangle.fill")
-                                        .font(.caption).foregroundStyle(.orange)
+                                        .font(FSFont.caption).foregroundStyle(.fsWarn)
                                         .lineLimit(1).truncationMode(.tail)
                                         .help(f.note)
                                 } else {
                                     Text(Self.why(f.confidence, f.reason) + (f.keepCopy.isEmpty ? "" : " · " + f.keepCopy))
-                                        .font(.caption).foregroundStyle(.secondary)
+                                        .font(FSFont.caption).foregroundStyle(.secondary)
                                         .lineLimit(1).truncationMode(.middle)
                                         .help(f.reason + (f.keepCopy.isEmpty ? "" : "\n" + f.keepCopy))
                                 }
@@ -281,12 +341,12 @@ private struct ConfirmDeleteSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Delete \(Fmt.count(gate.files)) files permanently?", systemImage: "exclamationmark.triangle.fill")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.red)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.fsError)
             Text("They are removed from this Mac (no Trash). Every one has a proven copy, is a duplicate, or is regenerable, and each is checked against the disk again right before it goes. Protected files are skipped.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("To confirm, type:").font(.callout)
+            Text("To confirm, type:").font(FSFont.body)
             Text(gate.phrase).font(.system(.body, design: .monospaced).weight(.semibold)).textSelection(.enabled)
             TextField("Type the phrase above", text: $typed)
                 .textFieldStyle(.roundedBorder)
@@ -296,7 +356,7 @@ private struct ConfirmDeleteSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Delete", role: .destructive, action: confirm)
-                    .buttonStyle(.borderedProminent).tint(.red)
+                    .buttonStyle(.borderedProminent).tint(.fsError)
                     .disabled(typed != gate.phrase)
             }
         }
@@ -328,7 +388,7 @@ private struct NoPlanView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Card("Ready now, by folder",
-                         subtitle: "Find Files I Can Delete re-checks each one against the backup and saves a plan you can review file by file. Nothing is deleted until you confirm.") {
+                         subtitle: "Delete re-checks each one against the backup, then asks you to confirm. Nothing is deleted until you type the confirmation phrase.") {
                         Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 9) {
                             ForEach(ready.prefix(30)) { f in
                                 GridRow {
@@ -340,7 +400,7 @@ private struct NoPlanView: View {
                                     Text(Fmt.bytes(f.bytes)).monospacedDigit()
                                         .frame(width: 88, alignment: .trailing)
                                 }
-                                .font(.callout)
+                                .font(FSFont.body)
                                 .help(f.kinds)
                             }
                         }

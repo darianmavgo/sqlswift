@@ -139,7 +139,7 @@ public struct QueryConsoleView: View {
                 .font(.system(size: 11, weight: .medium))
             Text(formatMicros(r.micros)).font(.system(size: 11, design: .monospaced)).foregroundColor(.secondary)
             if r.hasClippedText {
-                Text("long values cut at \(BehaviorConfig.textCellFetchMaxBytes.formatted()) bytes, marked …")
+                Text("long values cut at \(BehaviorConfig.textCellFetchMaxBytes.formatted(.number.locale(Locale(identifier: "en_US")))) bytes, marked …")
                     .font(.system(size: 11)).foregroundColor(.orange)
             }
             Spacer()

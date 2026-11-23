@@ -30,7 +30,7 @@ struct OverviewView: View {
                                     StateChip(state: e.state).frame(width: 64, alignment: .leading)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(Humanize.message(e.message)).lineLimit(2).help(e.message)
-                                        Text("\(Humanize.action(e.action)) · \(Fmt.ago(e.at))").font(.caption).foregroundStyle(.secondary)
+                                        Text("\(Humanize.action(e.action)) · \(Fmt.ago(e.at))").font(FSFont.caption).foregroundStyle(.secondary)
                                     }
                                 }
                             }
@@ -54,15 +54,15 @@ private struct ReclaimTile: View {
         Card {
             VStack(alignment: .leading, spacing: 8) {
                 Label("Ready to reclaim", systemImage: "externaldrive.badge.checkmark")
-                    .font(.callout.weight(.medium)).foregroundStyle(.tint)
+                    .font(FSFont.label).foregroundStyle(.tint)
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(Fmt.bytes(model.reclaim.totalBytes))
-                        .font(.system(size: 30, weight: .semibold, design: .rounded)).monospacedDigit()
+                        .font(.system(size: 30, weight: .semibold, design: .monospaced))
                         .contentTransition(.numericText())
                     if model.reclaimLoading { ProgressView().controlSize(.small) }
                 }
                 if by.isEmpty {
-                    Text("Files show up here once their copy is proven.").font(.callout).foregroundStyle(.secondary)
+                    Text("Files show up here once their copy is proven.").font(FSFont.body).foregroundStyle(.secondary)
                 } else {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(by.prefix(3), id: \.source) { r in
@@ -79,7 +79,7 @@ private struct ReclaimTile: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .font(.callout)
+                            .font(FSFont.body)
                         }
                     }
                 }
@@ -97,13 +97,13 @@ private struct AttentionTile: View {
         Card {
             VStack(alignment: .leading, spacing: 8) {
                 Label("Needs attention", systemImage: n == 0 ? "checkmark.seal" : "exclamationmark.triangle")
-                    .font(.callout.weight(.medium)).foregroundStyle(n == 0 ? Color.secondary : .orange)
+                    .font(FSFont.label).foregroundStyle(n == 0 ? Color.secondary : .fsWarn)
                 Text(Fmt.count(n))
-                    .font(.system(size: 30, weight: .semibold, design: .rounded)).monospacedDigit()
-                    .foregroundStyle(n == 0 ? Color.primary : .orange)
+                    .font(.system(size: 30, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(n == 0 ? Color.primary : .fsWarn)
                 Text(n == 0 ? (s.run == nil ? "No backup has run yet." : "Nothing failed in the latest backup.")
                      : "\(Fmt.files(n)) the latest backup could not prove.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(FSFont.body).foregroundStyle(.secondary)
                 if n > 0 {
                     Button("Review") { model.section = .backup }.buttonStyle(.link)
                 }
